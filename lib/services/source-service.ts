@@ -42,6 +42,7 @@ export class SourceService {
 
   async create(userId: string, input: CreateSourceInput) {
     if (!input.title.trim()) throw new Error('A source title is required');
+    if (!input.projectIds?.length) throw new Error('A project is required to save a source');
     const normalizedDoi = normalizeDoi(input.doi);
     const normalizedUrl = normalizeUrl(input.url);
     const canonicalUrl = input.canonicalUrl ? normalizeUrl(input.canonicalUrl) : undefined;

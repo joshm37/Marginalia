@@ -1,2 +1,100 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Marginalia</title><style>body{width:320px;margin:0;padding:18px;font:14px system-ui;background:#f6f4ef;color:#1d211d}h1{font:700 17px Georgia;margin:0 0 4px}.muted{color:#72766f;font-size:12px;margin-bottom:16px}.field{margin:10px 0}.field label{display:block;font-size:10px;color:#72766f;font-weight:700;margin-bottom:5px}.field input,.field textarea{width:100%;box-sizing:border-box;border:1px solid #ddd8ce;border-radius:6px;padding:8px}.field textarea{min-height:70px}button{width:100%;padding:9px;border:0;border-radius:6px;background:#315c4b;color:white;font-weight:700;cursor:pointer}.success{font-size:12px;color:#315c4b;margin-top:10px}</style></head><body><h1>Marginalia</h1><div class="muted">Capture the current page as a source.</div><div class="field"><label>TITLE</label><input id="title"></div><div class="field"><label>URL</label><input id="url"></div><div class="field"><label>AUTHOR / ORGANIZATION</label><input id="author"></div><div class="field"><label>SELECTED PASSAGE (OPTIONAL)</label><textarea id="selection"></textarea></div><button id="save">Save locally</button><div id="status"></div><script src="popup.js"></script></body></html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Marginalia</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <div class="mark">M</div>
+      <div>
+        <h1>Marginalia</h1>
+        <p>Save research as you browse</p>
+      </div>
+      <button id="signout" class="text hidden">Sign out</button>
+    </header>
+    <main>
+      <section id="loading" class="state">Opening your workspace…</section>
+      <form id="login" class="hidden">
+        <h2>Sign in</h2>
+        <p>Use the same account as the Marginalia dashboard.</p>
+        <label
+          >Email<input
+            id="email"
+            type="email"
+            required
+            autocomplete="email" /></label
+        ><label
+          >Password<input
+            id="password"
+            type="password"
+            required
+            autocomplete="current-password" /></label
+        ><button type="submit" class="primary">Sign in</button>
+      </form>
+      <form id="capture" class="hidden">
+        <div class="capture-heading">
+          <div>
+            <h2>Save this source</h2>
+            <p>Review the extracted metadata.</p>
+          </div>
+          <span id="typeBadge">Website</span>
+        </div>
+        <label>Title<input id="title" required /></label
+        ><label
+          >Authors · one per line<textarea
+            id="authors"
+            class="authors"
+          ></textarea>
+        </label>
+        <div class="row">
+          <label>Organization<input id="organization" /></label
+          ><label>Published<input id="date" type="date" /></label>
+        </div>
+        <label>URL<input id="url" type="url" required /></label>
+        <div class="row">
+          <label>DOI<input id="doi" /></label
+          ><label
+            >Type<select id="type">
+              <option>Article</option>
+              <option>Report</option>
+              <option>Case</option>
+              <option>Bill</option>
+              <option>Book</option>
+              <option>Website</option>
+            </select></label
+          >
+        </div>
+        <label
+          >Project<select id="project" required>
+            <option value="" disabled>Select a project</option>
+            <option value="__new__">Create a new project…</option>
+          </select></label
+        >
+        <div id="newProjectRow" class="inline-create hidden">
+          <input id="newProjectName" aria-label="New project name" /><button
+            id="createProject"
+            type="button"
+            class="secondary"
+          >
+            Create
+          </button>
+        </div>
+        <label>Tags</label><div class="tag-editor" id="sourceTagEditor"><div class="tag-control"><input aria-label="Add tag" placeholder="Type a tag and press Enter" /></div><div class="tag-options hidden"></div></div>
+        <label>Note<textarea id="notes"></textarea></label
+        ><button id="save" type="submit" class="primary">
+          Save to Marginalia
+        </button>
+      </form>
+      <section id="success" class="state hidden">
+        <div class="success-icon">✓</div>
+        <h2>Saved to Marginalia</h2>
+        <p>This source is now available in your dashboard.</p>
+        <button id="saveAnother" class="secondary">Back to source</button>
+      </section>
+      <div id="status" role="alert"></div>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

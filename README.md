@@ -71,4 +71,15 @@ The visual prototype still falls back to localStorage so it can be demonstrated 
 - Independent citation formatting layer
 - Browser-extension-ready source capture workflow
 
-The next production step is adding authentication and connecting the dashboard and extension API routes to these services.
+## Test the Chrome extension
+
+1. Start Marginalia with `npm run dev`.
+2. Open `chrome://extensions`, enable Developer mode, and choose **Load unpacked**.
+3. Select the repository's `extension` directory.
+4. Open an article, click the Marginalia extension, and sign in with your existing account.
+5. Review the extracted metadata, choose a project, and save.
+6. Close the extension popup and highlight text on the saved page.
+7. Add an annotation type, tags, and a note in the in-page Marginalia prompt.
+8. Return to the dashboard; it refreshes on focus and displays the source and annotation.
+
+The development extension targets `http://localhost:3000`. Before deployment, update `API_BASE` in `extension/auth-service.js` and `extension/api-service.js`, and replace the localhost entry in `extension/manifest.json` with the deployed host permission.

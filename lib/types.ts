@@ -24,6 +24,7 @@ export type Annotation = {
   tags: string[];
   projects: string[];
   type: AnnotationType;
+  pageNumber?: string;
   createdAt: string;
 };
 
