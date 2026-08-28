@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SourceType {
+  ARTICLE
+  REPORT
+  CASE
+  BILL
+  BOOK
+  WEBSITE
+}
+
+enum CaptureMethod {
+  EXTENSION
+  MANUAL
+  IMPORT
+}
+
+enum AnnotationType {
+  QUOTE
+  EVIDENCE
+  SUMMARY
+  QUESTION
+  COUNTERARGUMENT
+  NOTE
+}
+
+model User {
+  id          String       @id
+  email       String       @unique
+  displayName String?
+  sources     Source[]
+  projects    Project[]
+  tags        Tag[]
+  annotations Annotation[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Source {
+  id                 String          @id @default(cuid())
+  userId             String
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title              String
+  authors            String?
+  organization       String?
+  publicationDate    DateTime?
+  sourceType         SourceType
+  url                String
+  canonicalUrl       String?
+  normalizedUrl      String
+  doi                String?
+  description        String?
+  notes              String?
+  citationMetadata   Json?
+  captureMethod      CaptureMethod   @default(MANUAL)
+  metadataNeedsReview Boolean         @default(false)
+  fileUrl             String?
+  projects           ProjectSource[]
+  tags                SourceTag[]
+  annotations         Annotation[]
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@unique([userId, doi])
+  @@unique([userId, canonicalUrl])
+  @@unique([userId, normalizedUrl])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, sourceType])
+}
+
+model Project {
+  id          String              @id @default(cuid())
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  color       String?
+  archivedAt  DateTime?
+  sources     ProjectSource[]
+  annotations AnnotationProject[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+model Tag {
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  color       String?
+  sources     SourceTag[]
+  annotations AnnotationTag[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([userId, name])
+}
+
+model Annotation {
+  id              String              @id @default(cuid())
+  userId          String
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceId        String
+  source          Source              @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  selectedText    String
+  surroundingText String?
+  note            String?
+  pageUrl         String
+  annotationType  AnnotationType
+  locationData    Json?
+  projects        AnnotationProject[]
+  tags            AnnotationTag[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([sourceId, createdAt(sort: Desc)])
+}
+
+model ProjectSource {
+  projectId String
+  sourceId  String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source    Source  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  addedAt   DateTime @default(now())
+
+  @@id([projectId, sourceId])
+  @@index([sourceId])
+}
+
+model SourceTag {
+  sourceId String
+  tagId    String
+  source   Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  tag      Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([sourceId, tagId])
+  @@index([tagId])
+}
+
+model AnnotationProject {
+  annotationId String
+  projectId    String
+  annotation   Annotation @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([annotationId, projectId])
+  @@index([projectId])
+}
+
+model AnnotationTag {
+  annotationId String
+  tagId        String
+  annotation   Annotation @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+  tag          Tag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([annotationId, tagId])
+  @@index([tagId])
+}
