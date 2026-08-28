@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Research & Citation Manager",
+  "name": "Marginalia",
   "version": "0.1.0",
   "description": "Capture sources and selected passages into your research library.",
   "permissions": ["activeTab", "scripting", "storage"],

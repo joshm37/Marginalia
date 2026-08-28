@@ -10,6 +10,9 @@ export async function requireUser(request?: NextRequest) {
   const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user?.email) throw new UnauthorizedError('Authentication required');
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is not configured. Add your Supabase PostgreSQL connection string to .env.local and run the initial Prisma migration.');
+  }
 
   await prisma.user.upsert({
     where: { id: user.id },

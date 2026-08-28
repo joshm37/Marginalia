@@ -1,5 +1,5 @@
 {
-  "name": "research-citation-manager",
+  "name": "marginalia",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,6 +9,7 @@
     "lint": "next lint",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
     "db:studio": "prisma studio"
   },
   "dependencies": {

@@ -4,8 +4,9 @@ import { PrismaClient } from '@/lib/generated/prisma/client';
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
 function createPrismaClient() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error('DATABASE_URL is not configured');
+  // Keep route modules loadable so missing configuration can be returned as a
+  // structured API error instead of Next.js generating an HTML error page.
+  const connectionString = process.env.DATABASE_URL ?? 'postgresql://unconfigured:unconfigured@127.0.0.1:1/unconfigured';
   return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 }
 

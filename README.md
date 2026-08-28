@@ -1,4 +1,4 @@
-# Research & Citation Manager Prototype
+# Marginalia
 
 A browser-first research library prototype built with Next.js, TypeScript, and React.
 
@@ -38,8 +38,10 @@ Copy `.env.example` to `.env`, update `DATABASE_URL` for your PostgreSQL instanc
 
 ```bash
 npm run db:generate
-npm run db:migrate -- --name init
+npm run db:push
 ```
+
+`db:push` is the simplest bootstrap command for a hosted Supabase development database. Use versioned Prisma migrations before production deployment.
 
 ## Authentication setup
 

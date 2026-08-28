@@ -2,7 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Research & Citation Manager',
+  title: 'Marginalia',
   description: 'A browser-first research library for policy and legal research.',
 };
 

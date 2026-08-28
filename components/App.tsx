@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, BookOpen, BookmarkPlus, ChevronDown, ExternalLink, FileText, FolderOpen, Highlighter, Home, Library, Plus, Search, Settings, Tag, Trash2, Copy, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, BookOpen, BookmarkPlus, ChevronDown, ExternalLink, FileText, FolderOpen, Highlighter, Home, Library, LogOut, Moon, Plus, Search, Settings, Sun, Tag, Trash2, Copy, X } from 'lucide-react';
 import { Annotation, Project, Source, SourceType } from '@/lib/types';
 
 const sourceTypes: SourceType[] = ['Article', 'Report', 'Case', 'Bill', 'Book', 'Website'];
@@ -22,6 +22,9 @@ export default function App() {
   const [user, setUser] = useState({ name: '', email: '' });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [accountMenu, setAccountMenu] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState('Dashboard');
   const [query, setQuery] = useState('');
   const [modal, setModal] = useState<'source' | 'annotation' | 'project' | null>(null);
@@ -31,12 +34,32 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/workspace').then(async response => {
-      if (!response.ok) throw new Error((await response.json()).error ?? 'Could not load your workspace');
-      return response.json();
+      const data = await readJsonResponse(response);
+      if (!response.ok) throw new Error(data.error ?? 'Could not load your workspace');
+      return data;
     }).then(data => {
       setSources(data.sources); setProjects(data.projects); setAnnotations(data.annotations); setUser(data.user);
     }).catch(error => setLoadError(error instanceof Error ? error.message : 'Could not load your workspace')).finally(() => setLoading(false));
   }, []);
+  useEffect(() => {
+    const preferred = localStorage.getItem('rcm-theme') === 'dark' || (!localStorage.getItem('rcm-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    setDarkMode(preferred); document.documentElement.dataset.theme = preferred ? 'dark' : 'light';
+  }, []);
+  useEffect(() => {
+    if (!accountMenu) return;
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (!accountRef.current?.contains(event.target as Node)) setAccountMenu(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setAccountMenu(false);
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [accountMenu]);
 
   const filteredSources = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -52,16 +75,16 @@ export default function App() {
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><BookOpen size={18}/></div><div><h1>Commonplace</h1><p>Research workspace</p></div></div>
+      <div className="brand"><div className="brand-mark"><BookOpen size={18}/></div><div><h1>Marginalia</h1><p>Research workspace</p></div></div>
       <nav className="nav">
         <div className="section-label">Workspace</div>
         <button className={view === 'Dashboard' ? 'active' : ''} onClick={() => setView('Dashboard')}><Home size={16}/><span>Dashboard</span></button>
+        <button className={view === 'Projects' ? 'active' : ''} onClick={() => setView('Projects')}><FolderOpen size={16}/><span>Projects</span></button>
         <button className={view === 'Sources' ? 'active' : ''} onClick={() => setView('Sources')}><Library size={16}/><span>Sources</span></button>
         <button className={view === 'Annotations' ? 'active' : ''} onClick={() => setView('Annotations')}><Highlighter size={16}/><span>Annotations</span></button>
-        <button className={view === 'Projects' ? 'active' : ''} onClick={() => setView('Projects')}><FolderOpen size={16}/><span>Projects</span></button>
         <div className="section-label">Manage</div>
         <button className={view === 'Tags' ? 'active' : ''} onClick={() => setView('Tags')}><Tag size={16}/><span>Tags</span></button>
-        <button onClick={() => notify('Settings are reserved for the production version')}><Settings size={16}/><span>Settings</span></button>
+        <button className={view === 'Settings' ? 'active' : ''} onClick={() => setView('Settings')}><Settings size={16}/><span>Settings</span></button>
       </nav>
       <div className="sidebar-capture"><div className="capture-icon"><BookmarkPlus size={17}/></div><strong>Capture as you browse</strong><p>Save any webpage with the Chrome extension.</p><button onClick={() => notify('Extension setup is coming next')}>Extension setup <ArrowRight size={13}/></button></div>
       <div className="sidebar-footer"><span className="status-dot"/> Demo workspace</div>
@@ -70,15 +93,16 @@ export default function App() {
     <main className="main">
       <header className="topbar">
         <div className="search"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} onFocus={() => setView('Sources')} placeholder="Search your research..." /><kbd>⌘ K</kbd></div>
-        <div className="topbar-actions"><button className="btn primary" onClick={() => setModal('source')}><Plus size={16}/> Add source</button><form action="/auth/signout" method="post"><button className="profile" aria-label="Sign out" title="Sign out"><span>{initials(user.name || user.email)}</span><div><strong>{user.name || user.email}</strong><small>Personal workspace</small></div><ChevronDown size={14}/></button></form></div>
+        <div className="topbar-actions"><button className="btn primary" onClick={() => setModal('source')}><BookmarkPlus size={16}/> Save a source</button><div className="account" ref={accountRef}><button className={`profile ${accountMenu ? 'open' : ''}`} aria-label="Open account menu" aria-expanded={accountMenu} onClick={() => setAccountMenu(value => !value)}><span>{initials(user.name || user.email)}</span><div><strong>{user.name || user.email}</strong><small>Personal workspace</small></div><ChevronDown size={14}/></button>{accountMenu && <div className="account-menu"><div className="account-menu-user"><strong>{user.name || 'Researcher'}</strong><span>{user.email}</span></div><button onClick={() => { const next = !darkMode; setDarkMode(next); document.documentElement.dataset.theme = next ? 'dark' : 'light'; localStorage.setItem('rcm-theme', next ? 'dark' : 'light'); }}><span>{darkMode ? <Sun size={15}/> : <Moon size={15}/>}Dark mode</span><span className={`toggle ${darkMode ? 'on' : ''}`}><i/></span></button><button onClick={() => { setView('Settings'); setAccountMenu(false); }}><span><Settings size={15}/>Settings</span></button><div className="menu-separator"/><form action="/auth/signout" method="post"><button className="logout"><span><LogOut size={15}/>Log out</span></button></form></div>}</div></div>
       </header>
 
       <div className="content">
-        {view === 'Dashboard' && <Dashboard userName={user.name} sources={sources} projects={projects} annotations={annotations} onSource={setSelectedSource} onAdd={() => setModal('source')} onNavigate={setView} />}
+        {view === 'Dashboard' && <Dashboard userName={user.name} sources={sources} projects={projects} annotations={annotations} onSource={setSelectedSource} onAddProject={() => setModal('project')} onNavigate={setView} />}
         {view === 'Sources' && <SourcesView sources={filteredSources} activeType={sourceType} onType={setSourceType} onSource={setSelectedSource} onDelete={deleteSource} onCopy={copyCitation} onAdd={() => setModal('source')} />}
         {view === 'Annotations' && <AnnotationsView annotations={annotations} sources={sources} onAdd={() => setModal('annotation')} />}
         {view === 'Projects' && <ProjectsView projects={projects} sources={sources} annotations={annotations} onAdd={() => setModal('project')} />}
         {view === 'Tags' && <TagsView sources={sources} annotations={annotations} />}
+        {view === 'Settings' && <SettingsView user={user} darkMode={darkMode} onTheme={() => { const next = !darkMode; setDarkMode(next); document.documentElement.dataset.theme = next ? 'dark' : 'light'; localStorage.setItem('rcm-theme', next ? 'dark' : 'light'); }} />}
       </div>
     </main>
 
@@ -91,22 +115,25 @@ export default function App() {
 }
 
 function initials(value: string) { return value.split(/\s+|@/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join(''); }
-async function postJson<T>(url: string, body: unknown): Promise<T> { const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? 'Request failed'); return data; }
+async function readJsonResponse(response: Response) {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(`The server returned an unexpected ${response.status} response. Check the development server for the underlying error.`);
+  }
+  return response.json();
+}
+async function postJson<T>(url: string, body: unknown): Promise<T> { const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const data = await readJsonResponse(response); if (!response.ok) throw new Error(data.error ?? 'Request failed'); return data; }
 
-function Dashboard({ userName, sources, projects, annotations, onSource, onAdd, onNavigate }: { userName: string; sources: Source[]; projects: Project[]; annotations: Annotation[]; onSource: (s: Source) => void; onAdd: () => void; onNavigate: (view: string) => void }) {
+function Dashboard({ userName, sources, projects, annotations, onSource, onAddProject, onNavigate }: { userName: string; sources: Source[]; projects: Project[]; annotations: Annotation[]; onSource: (s: Source) => void; onAddProject: () => void; onNavigate: (view: string) => void }) {
   return <>
-    <div className="page-title hero-title"><div><div className="eyebrow"><span className="status-dot"/> Your research workspace</div><h2>Welcome back{userName ? `, ${userName.split(' ')[0]}` : ''}.</h2><p>Pick up where you left off, or capture something new for your research.</p></div><button className="btn primary" onClick={onAdd}><BookmarkPlus size={16}/> Save a source</button></div>
-    <div className="grid stats">
-      <div className="card stat"><div className="stat-icon green"><Library size={17}/></div><div><div className="value">{sources.length}</div><div className="label">Sources saved</div></div></div>
-      <div className="card stat"><div className="stat-icon gold"><Highlighter size={17}/></div><div><div className="value">{annotations.length}</div><div className="label">Annotations</div></div></div>
-      <div className="card stat"><div className="stat-icon blue"><FolderOpen size={17}/></div><div><div className="value">{projects.length}</div><div className="label">Active projects</div></div></div>
-      <div className="card stat"><div className="stat-icon plum"><Tag size={17}/></div><div><div className="value">{new Set(sources.flatMap(s => s.tags)).size}</div><div className="label">Research tags</div></div></div>
+    <div className="page-title hero-title"><div><div className="eyebrow"><span className="status-dot"/> Your research workspace</div><h2>Welcome back{userName ? `, ${userName.split(' ')[0]}` : ''}.</h2><p>Pick up where you left off, or capture something new for your research.</p></div><button className="btn primary" onClick={onAddProject}><Plus size={16}/> Create project</button></div>
+    <div className="dashboard-priority">
+      <section className="card featured-projects"><div className="card-header"><div className="section-heading"><span className="section-heading-icon"><FolderOpen size={15}/></span><div><h3>Active projects</h3><p>Your research in progress · {projects.length} active</p></div></div><button className="text-button" onClick={() => onNavigate('Projects')}>View all projects <ArrowRight size={14}/></button></div><div className="project-showcase">{projects.map((p, index) => <button className="project project-feature" key={p.id} onClick={() => onNavigate('Projects')}><span className={`project-mark mark-${index + 1}`}><FolderOpen size={17}/></span><span><strong>{p.name}</strong><small>{p.description || 'Research workspace'}</small><span className="project-counts">{sources.filter(s => s.projects.includes(p.id)).length} sources · {annotations.filter(a => a.projects.includes(p.id)).length} annotations</span></span><ArrowRight size={14}/></button>)}</div></section>
+      <div className="dashboard-secondary">
+        <section className="card"><div className="card-header"><div className="section-heading"><span className="section-heading-icon"><BookmarkPlus size={15}/></span><div><h3>Recently saved</h3><p>Your latest additions</p></div></div><button className="text-button" onClick={() => onNavigate('Sources')}>View library <ArrowRight size={14}/></button></div>{sources.slice(0, 4).map(s => <button className="source-row" key={s.id} onClick={() => onSource(s)}><div className="source-type-icon"><FileText size={17}/></div><div><div className="source-title">{s.title}</div><div className="source-meta">{s.organization || s.authors} · {s.date}</div><div>{s.tags.slice(0, 2).map(t => <span className="pill" key={t}>#{t}</span>)}</div></div><span className="source-kind">{s.type}</span></button>)}</section>
+        <section className="card"><div className="card-header"><div className="section-heading"><span className="section-heading-icon"><Highlighter size={15}/></span><div><h3>Recent annotations</h3><p>Your latest evidence and notes</p></div></div><button className="text-button" onClick={() => onNavigate('Annotations')}>View annotations <ArrowRight size={14}/></button></div>{annotations.slice(0, 4).map(a => <div className="annotation dashboard-annotation" key={a.id}><div className="quote">{a.selectedText}</div><div className="note">{a.note || 'No note added'} · {sources.find(s => s.id === a.sourceId)?.title}</div></div>)}</section>
+      </div>
     </div>
-    <div className="two-col">
-      <section className="card"><div className="card-header"><div><h3>Recently saved</h3><p>Your latest additions from the web and dashboard</p></div><button className="text-button" onClick={() => onNavigate('Sources')}>View library <ArrowRight size={14}/></button></div>{sources.slice(0, 4).map(s => <button className="source-row" key={s.id} onClick={() => onSource(s)}><div className="source-type-icon"><FileText size={17}/></div><div><div className="source-title">{s.title}</div><div className="source-meta">{s.organization || s.authors} · {s.date}</div><div>{s.tags.slice(0, 2).map(t => <span className="pill" key={t}>#{t}</span>)}</div></div><span className="source-kind">{s.type}</span></button>)}</section>
-      <section className="card"><div className="card-header"><div><h3>Active projects</h3><p>Research in progress</p></div><button className="icon-btn" onClick={() => onNavigate('Projects')}><ArrowRight size={15}/></button></div><div className="list">{projects.map((p, index) => <button className="project" key={p.id} onClick={() => onNavigate('Projects')}><span className={`project-mark mark-${index + 1}`}><FolderOpen size={16}/></span><span><strong>{p.name}</strong><small>{sources.filter(s => s.projects.includes(p.id)).length} sources · {annotations.filter(a => a.projects.includes(p.id)).length} annotations</small></span><ArrowRight size={14}/></button>)}</div></section>
-    </div>
-    <div style={{marginTop:18}} className="card"><div className="card-header"><h3>Recent annotations</h3></div>{annotations.slice(0, 3).map(a => <div className="annotation" key={a.id}><div className="quote">{a.selectedText}</div><div className="note">{a.note || 'No note added'} · {sources.find(s => s.id === a.sourceId)?.title}</div></div>)}</div>
   </>;
 }
 
@@ -125,6 +152,10 @@ function ProjectsView({ projects, sources, annotations, onAdd }: { projects: Pro
 function TagsView({ sources, annotations }: { sources: Source[]; annotations: Annotation[] }) {
   const tags = new Map<string, number>(); sources.flatMap(s => s.tags).forEach(t => tags.set(t, (tags.get(t) || 0) + 1)); annotations.flatMap(a => a.tags).forEach(t => tags.set(t, (tags.get(t) || 0) + 1));
   return <><div className="page-title"><div><div className="kicker">Organization</div><h2>Tags</h2><p>A lightweight taxonomy for finding evidence by topic.</p></div></div><div className="card">{[...tags.entries()].sort((a,b)=>b[1]-a[1]).map(([t,n]) => <span className="pill" key={t} style={{padding:'8px 11px'}}>#{t} · {n}</span>)}</div></>;
+}
+
+function SettingsView({ user, darkMode, onTheme }: { user: { name: string; email: string }; darkMode: boolean; onTheme: () => void }) {
+  return <><div className="page-title"><div><div className="kicker">Account</div><h2>Settings</h2><p>Manage your workspace preferences and account information.</p></div></div><div className="settings-grid"><section className="card settings-card"><div><h3>Profile</h3><p>Your identity is managed securely through Supabase Auth.</p></div><div className="settings-profile"><span>{initials(user.name || user.email)}</span><div><strong>{user.name || 'Researcher'}</strong><small>{user.email}</small></div></div></section><section className="card settings-card"><div><h3>Appearance</h3><p>Choose how Marginalia looks on this device.</p></div><button className="setting-row" onClick={onTheme}><span className="setting-icon">{darkMode ? <Moon size={17}/> : <Sun size={17}/>}</span><span><strong>Dark mode</strong><small>{darkMode ? 'Dark appearance is enabled' : 'Light appearance is enabled'}</small></span><span className={`toggle ${darkMode ? 'on' : ''}`}><i/></span></button></section></div></>;
 }
 
 function SourceDetail({ source, annotations, onClose, onCopy }: { source: Source; annotations: Annotation[]; onClose: () => void; onCopy: () => void }) {
