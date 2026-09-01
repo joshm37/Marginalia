@@ -3,7 +3,7 @@
 A browser-first research library prototype built with Next.js, TypeScript, and React.
 
 ## What works
-- Dashboard with source/project/annotation stats
+- Dashboard with source/project/excerpt stats
 - Source library with search
 - Add source flow
 - Source detail view
@@ -12,7 +12,7 @@ A browser-first research library prototype built with Next.js, TypeScript, and R
 - Open original source
 - Projects
 - Tags
-- Annotation library
+- Excerpt library
 - Local persistence using `localStorage`
 - Responsive UI
 
@@ -56,7 +56,9 @@ In Supabase Auth URL Configuration, set the local Site URL to `http://localhost:
 
 The dashboard and application pages are protected by middleware. API routes independently verify the current user and scope every repository operation by the verified Supabase user ID.
 
-The Prisma schema models users, sources, projects, tags, annotations, and explicit join records. UI code should access persistence through the repository and service modules in `lib/repositories` and `lib/services`; it should never import the Prisma client directly.
+The Prisma schema models users, sources, projects, tags, excerpts, and explicit join records. UI code should access persistence through the repository and service modules in `lib/repositories` and `lib/services`; it should never import the Prisma client directly.
+
+If your database was created before the excerpt terminology change, run `npm run db:rename-excerpts` once. It renames the existing tables, enum, columns, indexes, and constraints without deleting excerpt data. Then run `npm run db:generate`.
 
 ## Architecture notes
 
@@ -64,7 +66,7 @@ The visual prototype still falls back to localStorage so it can be demonstrated 
 
 - Next.js App Router
 - TypeScript
-- Source / Project / Annotation entities
+- Source / Project / Excerpt entities
 - Repository/service boundary around Prisma
 - User-scoped database records and duplicate-detection indexes
 - Replaceable search layer
@@ -79,7 +81,7 @@ The visual prototype still falls back to localStorage so it can be demonstrated 
 4. Open an article, click the Marginalia extension, and sign in with your existing account.
 5. Review the extracted metadata, choose a project, and save.
 6. Close the extension popup and highlight text on the saved page.
-7. Add an annotation type, tags, and a note in the in-page Marginalia prompt.
-8. Return to the dashboard; it refreshes on focus and displays the source and annotation.
+7. Add an excerpt type, tags, and a note in the in-page Marginalia prompt.
+8. Return to the dashboard; it refreshes on focus and displays the source and excerpt.
 
 The development extension targets `http://localhost:3000`. Before deployment, update `API_BASE` in `extension/auth-service.js` and `extension/api-service.js`, and replace the localhost entry in `extension/manifest.json` with the deployed host permission.

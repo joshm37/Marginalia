@@ -7,18 +7,26 @@ type SourceRecord = {
   sourceType: string;
   url: string;
   description: string | null;
+  bibliographyAnnotation: string | null;
+  includeInBibliography: boolean;
   notes: string | null;
   createdAt: Date;
   tags: { tag: { name: string } }[];
   projects: { projectId: string }[];
 };
-type ProjectRecord = { id: string; name: string; description: string | null };
-type AnnotationRecord = {
+type ProjectRecord = {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  deletedAt: Date | null;
+};
+type ExcerptRecord = {
   id: string;
   sourceId: string;
   selectedText: string;
   note: string | null;
-  annotationType: string;
+  excerptType: string;
   createdAt: Date;
   locationData?: unknown;
   tags: { tag: { name: string } }[];
@@ -38,6 +46,8 @@ export function sourceDto(value: SourceRecord) {
     url: value.url,
     type: titleCase(value.sourceType),
     description: value.description ?? "",
+    bibliographyAnnotation: value.bibliographyAnnotation ?? "",
+    includeInBibliography: value.includeInBibliography,
     tags: value.tags.map((item) => item.tag.name),
     projects: value.projects.map((item) => item.projectId),
     notes: value.notes ?? "",
@@ -49,12 +59,14 @@ export function projectDto(value: ProjectRecord) {
     id: value.id,
     name: value.name,
     description: value.description ?? "",
+    isActive: value.isActive,
+    deletedAt: value.deletedAt?.toISOString() ?? null,
   };
 }
-export function annotationDto(value: AnnotationRecord) {
+export function excerptDto(value: ExcerptRecord) {
   const location =
     value.locationData && typeof value.locationData === "object"
-      ? (value.locationData as { pageNumber?: string })
+      ? (value.locationData as { pageNumber?: unknown })
       : undefined;
   return {
     id: value.id,
@@ -63,8 +75,11 @@ export function annotationDto(value: AnnotationRecord) {
     note: value.note ?? "",
     tags: value.tags.map((item) => item.tag.name),
     projects: value.projects.map((item) => item.projectId),
-    type: titleCase(value.annotationType),
-    pageNumber: location?.pageNumber,
+    type: titleCase(value.excerptType),
+    pageNumber:
+      typeof location?.pageNumber === "string" && location.pageNumber
+        ? location.pageNumber
+        : undefined,
     createdAt: value.createdAt.toISOString().slice(0, 10),
   };
 }

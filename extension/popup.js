@@ -18,6 +18,26 @@ const status = (message) => {
 const PROJECTS_KEY = "marginaliaProjects";
 const SOURCES_KEY = "marginaliaSavedSources";
 let sourceTags = [];
+async function applySavedTheme() {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "get-popup-theme",
+    });
+    const theme =
+      response?.theme === "dark" || response?.theme === "light"
+        ? response.theme
+        : matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+    document.documentElement.dataset.theme = theme;
+  } catch {
+    document.documentElement.dataset.theme = matchMedia(
+      "(prefers-color-scheme: dark)",
+    ).matches
+      ? "dark"
+      : "light";
+  }
+}
 function setupTagEditor() {
   const root = $("#sourceTagEditor"),
     control = root.querySelector(".tag-control"),
@@ -367,6 +387,7 @@ $("#saveAnother").addEventListener("click", () =>
     show("login");
   }),
 );
+applySavedTheme();
 getSession()
   .then((session) => (session ? openCapture() : show("login")))
   .catch((error) => {

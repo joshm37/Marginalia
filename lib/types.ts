@@ -1,5 +1,7 @@
-export type SourceType = 'Article' | 'Report' | 'Case' | 'Bill' | 'Book' | 'Website';
-export type AnnotationType = 'Quote' | 'Evidence' | 'Summary' | 'Question' | 'Counterargument' | 'Note';
+export type SourceType =
+  "Article" | "Report" | "Case" | "Bill" | "Book" | "Website";
+export type AnnotationType =
+  "Evidence" | "Summary" | "Question" | "Counterargument" | "Note";
 
 export type Source = {
   id: string;
@@ -10,6 +12,8 @@ export type Source = {
   url: string;
   type: SourceType;
   description: string;
+  bibliographyAnnotation?: string;
+  includeInBibliography?: boolean;
   tags: string[];
   projects: string[];
   notes: string;
@@ -28,4 +32,10 @@ export type Annotation = {
   createdAt: string;
 };
 
-export type Project = { id: string; name: string; description: string; };
+export type Project = {
+  id: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+  deletedAt: string | null;
+};

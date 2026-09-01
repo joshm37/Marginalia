@@ -1,10 +1,80 @@
 let marginaliaHost = null;
 let selectionTimer = null;
 let lastSelection = "";
+let anchorRange = null;
+let isPointerSelecting = false;
+let positionFrame = null;
+
 function removePopup() {
+  clearTimeout(selectionTimer);
+  if (positionFrame) cancelAnimationFrame(positionFrame);
   marginaliaHost?.remove();
   marginaliaHost = null;
+  anchorRange = null;
   lastSelection = "";
+}
+
+function dashboardTheme() {
+  try {
+    const theme = localStorage.getItem("rcm-theme");
+    return theme === "dark" || theme === "light" ? theme : null;
+  } catch {}
+  return null;
+}
+
+function syncDashboardTheme() {
+  const theme = dashboardTheme();
+  if (theme)
+    chrome.runtime
+      .sendMessage({ type: "set-popup-theme", theme })
+      .catch(() => undefined);
+}
+
+async function popupTheme() {
+  const localTheme = dashboardTheme();
+  if (localTheme) {
+    chrome.runtime
+      .sendMessage({ type: "set-popup-theme", theme: localTheme })
+      .catch(() => undefined);
+    return localTheme;
+  }
+  const saved = await chrome.runtime
+    .sendMessage({ type: "get-popup-theme" })
+    .catch(() => null);
+  if (saved?.theme === "dark" || saved?.theme === "light") return saved.theme;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+function positionPopup() {
+  if (!marginaliaHost || !anchorRange) return;
+  const rect = anchorRange.getBoundingClientRect();
+  if (!rect.width && !rect.height) return;
+  const anchorVisible = rect.bottom > 0 && rect.top < window.innerHeight;
+  marginaliaHost.style.opacity = anchorVisible ? "1" : "0";
+  marginaliaHost.style.pointerEvents = anchorVisible ? "auto" : "none";
+  if (!anchorVisible) return;
+  const width = 304;
+  const popupHeight = marginaliaHost.getBoundingClientRect().height || 310;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const top =
+    spaceBelow >= Math.min(popupHeight + 14, 330)
+      ? rect.bottom + 10
+      : Math.max(10, rect.top - popupHeight - 10);
+  const left = Math.max(
+    10,
+    Math.min(
+      window.innerWidth - width - 10,
+      rect.left + rect.width / 2 - width / 2,
+    ),
+  );
+  marginaliaHost.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
+}
+
+function queuePosition() {
+  if (positionFrame) cancelAnimationFrame(positionFrame);
+  positionFrame = requestAnimationFrame(positionPopup);
 }
 function captureSelection(selection) {
   const range = selection.getRangeAt(0),
@@ -26,6 +96,7 @@ function captureSelection(selection) {
             .trim()
         : "",
     rect,
+    range: range.cloneRange(),
     locationData: {
       title: document.title,
       x: Math.round(rect.x),
@@ -40,30 +111,42 @@ async function showPopup(selection) {
     (captured.selectedText === lastSelection && marginaliaHost)
   )
     return;
-  const response = await chrome.runtime
-    .sendMessage({ type: "annotation-context", url: location.href })
-    .catch((error) => ({ error: error.message }));
+  const [response, theme] = await Promise.all([
+    chrome.runtime
+      .sendMessage({ type: "annotation-context", url: location.href })
+      .catch((error) => ({ error: error.message })),
+    popupTheme(),
+  ]);
+  const currentSelection = window.getSelection()?.toString().trim();
+  if (isPointerSelecting || currentSelection !== captured.selectedText) return;
   if (!response?.context) {
     if (response?.error) console.warn("Marginalia:", response.error);
     return;
   }
-  lastSelection = captured.selectedText;
   removePopup();
-  const rect = captured.rect;
+  lastSelection = captured.selectedText;
+  anchorRange = captured.range;
   marginaliaHost = document.createElement("div");
-  marginaliaHost.style.cssText = `position:fixed;z-index:2147483647;left:${Math.max(12, Math.min(window.innerWidth - 344, rect.left))}px;top:${Math.max(12, Math.min(window.innerHeight - 340, rect.bottom + 10))}px;width:332px;`;
+  marginaliaHost.style.cssText =
+    "position:fixed;z-index:2147483647;left:0;top:0;width:304px;";
   const shadow = marginaliaHost.attachShadow({ mode: "open" });
-  shadow.innerHTML = `<style>*{box-sizing:border-box}.box{padding:14px;border:1px solid #d8d5cd;border-radius:10px;background:#fff;color:#1b2520;box-shadow:0 14px 42px rgba(0,0,0,.22);font:12px system-ui,sans-serif}.head{display:flex;justify-content:space-between;gap:10px}.brand{color:#315c4b;font-weight:800;font-size:11px}.close{border:0;background:transparent;color:#777;cursor:pointer;font-size:17px;line-height:1}.destination{margin:4px 0 10px;color:#777;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote{max-height:58px;overflow:hidden;margin:0 0 10px;padding:8px 9px;border-left:3px solid #315c4b;background:#f5f5f1;font:11px/1.45 Georgia,serif}.row{display:grid;grid-template-columns:1fr 1fr;gap:7px}label{display:block;margin:7px 0 0;color:#747873;font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}input,select,textarea{width:100%;margin-top:4px;padding:7px;border:1px solid #d8d5cd;border-radius:6px;background:#fff;color:#1b2520;font:11px system-ui;outline:none}textarea{min-height:48px;resize:vertical}.save{width:100%;margin-top:10px;padding:8px;border:0;border-radius:6px;background:#315c4b;color:#fff;font-weight:800;cursor:pointer}.save:disabled{opacity:.6}.message{margin-top:7px;color:#9a4f46;font-size:10px}.done{color:#315c4b}</style><div class="box"><div class="head"><span class="brand">Save to Marginalia</span><button class="close" aria-label="Close">×</button></div><div class="destination"></div><div class="quote"></div><div class="row"><label>Type<select><option>Quote</option><option>Evidence</option><option>Summary</option><option>Question</option><option>Counterargument</option><option>Note</option></select></label><label>Tags<input></label></div><label>Annotation<textarea></textarea></label><button class="save">Save annotation</button><div class="message"></div></div>`;
+  shadow.innerHTML = `<style>:host{--surface:rgba(255,255,255,.96);--surface-raised:#fff;--ink:#18211d;--muted:#747b77;--line:rgba(31,49,40,.14);--soft:#f2f5f3;--accent:#315c4b;--accent-bright:#467c65;--danger:#a44e48;--shadow:0 18px 48px rgba(15,24,19,.18),0 2px 8px rgba(15,24,19,.08)}:host([data-theme="dark"]){--surface:rgba(13,13,13,.96);--surface-raised:#171717;--ink:#f2f3f2;--muted:#9b9f9c;--line:rgba(255,255,255,.13);--soft:#202220;--accent:#62a080;--accent-bright:#78b493;--danger:#e4857d;--shadow:0 22px 60px rgba(0,0,0,.48),0 2px 10px rgba(0,0,0,.35);color-scheme:dark}*{box-sizing:border-box}.box{padding:11px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow);backdrop-filter:blur(18px) saturate(135%);font:11px/1.35 ui-sans-serif,system-ui,-apple-system,sans-serif}.head{display:flex;align-items:center;justify-content:space-between;gap:8px}.brand{display:flex;align-items:center;gap:6px;color:var(--accent);font-weight:750;font-size:10px;letter-spacing:.01em}.brand:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}.close{width:22px;height:22px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer;font-size:16px;line-height:20px}.close:hover{background:var(--soft);color:var(--ink)}.destination{margin:2px 28px 7px 13px;color:var(--muted);font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote{max-height:82px;overflow-y:auto;margin:0 0 7px;padding:7px 9px;border-radius:8px;background:var(--soft);color:var(--ink);font:10px/1.42 Georgia,serif;scrollbar-width:thin;scrollbar-color:var(--muted) transparent}.quote::-webkit-scrollbar{width:5px}.quote::-webkit-scrollbar-thumb{border-radius:8px;background:var(--muted)}.row{display:grid;grid-template-columns:76px minmax(0,1fr) 52px;gap:6px}.row label{position:relative}label{display:block;margin:6px 0 0;color:var(--muted);font-size:7px;font-weight:750;text-transform:uppercase;letter-spacing:.07em}input,select,textarea{width:100%;margin-top:3px;padding:6px 7px;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised);color:var(--ink);font:10px ui-sans-serif,system-ui,sans-serif;outline:none;transition:border-color 100ms,box-shadow 100ms}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}textarea{min-height:40px;max-height:92px;resize:vertical}.actions{display:flex;align-items:center;gap:7px;margin-top:8px}.shortcut{flex:1;color:var(--muted);font-size:8px}.save{padding:7px 11px;border:0;border-radius:7px;background:var(--accent);color:#fff;font:700 10px ui-sans-serif,system-ui;cursor:pointer;transition:background 90ms,transform 90ms}.save:hover{background:var(--accent-bright);transform:translateY(-1px)}.save:disabled{opacity:.6;transform:none}.message{min-height:0;margin-top:5px;color:var(--danger);font-size:9px}.message:empty{display:none}.done{color:var(--accent)}</style><div class="box"><div class="head"><span class="brand">Marginalia</span><button class="close" aria-label="Close">×</button></div><div class="destination"></div><div class="quote"></div><div class="row"><label>Type<select><option>Quote</option><option>Evidence</option><option>Summary</option><option>Question</option><option>Counterargument</option><option>Note</option></select></label><label>Tags<input></label></div><label>Annotation<textarea></textarea></label><div class="actions"><span class="shortcut">⌘/Ctrl + Enter</span><button class="save">Save annotation</button></div><div class="message"></div></div>`;
+  shadow.host.setAttribute("data-theme", theme);
+  shadow.innerHTML = shadow.innerHTML
+    .replace("<option>Quote</option>", "")
+    .replace(">Annotation<", ">Excerpt note<")
+    .replace("Save annotation", "Save excerpt");
   shadow.querySelector(".destination").textContent =
     `${response.context.sourceTitle} · ${response.context.projectName}`;
   shadow.querySelector(".quote").textContent = `“${captured.selectedText}”`;
   shadow.querySelector(".close").onclick = removePopup;
   const extraStyle = document.createElement("style");
   extraStyle.textContent =
-    ".tag-control{min-height:31px;margin-top:4px;padding:3px 5px;display:flex;align-items:center;flex-wrap:wrap;gap:3px;border:1px solid #d8d5cd;border-radius:6px}.tag-control input{flex:1;min-width:70px;margin:0;border:0;padding:3px}.tag-control input::placeholder{color:#aaa}.tag-chip{display:inline-flex;align-items:center;gap:2px;padding:3px 5px;border-radius:99px;background:#e9efeb;color:#315c4b;font-size:8px}.tag-chip button{width:0;overflow:hidden;padding:0;border:0;background:transparent;color:inherit;opacity:0}.tag-chip:hover button{width:10px;opacity:1}.tag-options{max-height:105px;overflow:auto;margin-top:3px;padding:3px;border:1px solid #ddd;border-radius:5px}.tag-options.hidden{display:none}.tag-options button{width:100%;padding:5px;border:0;background:#fff;text-align:left;font-size:9px}.tag-options button:hover{background:#f5f5f1}.page-field{display:block;width:72px;margin-top:7px}.page-field input{width:64px}";
+    ".tag-control{min-height:27px;margin-top:3px;padding:2px 4px;display:flex;align-items:center;flex-wrap:wrap;gap:3px;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised)}.tag-control:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}.tag-control input{flex:1;min-width:58px;margin:0;border:0;padding:3px;background:transparent;box-shadow:none}.tag-control input::placeholder{color:var(--muted)}.tag-chip{display:inline-flex;align-items:center;gap:2px;padding:3px 5px;border-radius:99px;background:color-mix(in srgb,var(--accent) 16%,var(--surface-raised));color:var(--accent);font-size:8px}.tag-chip button{width:0;overflow:hidden;padding:0;border:0;background:transparent;color:inherit;opacity:0}.tag-chip:hover button{width:10px;opacity:1}.tag-options{position:absolute;z-index:3;max-height:100px;overflow:auto;margin-top:3px;padding:3px;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised);box-shadow:var(--shadow)}.tag-options.hidden{display:none}.tag-options button{width:100%;padding:5px;border:0;border-radius:4px;background:transparent;color:var(--ink);text-align:left;font-size:9px}.tag-options button:hover{background:var(--soft)}.page-field{display:block;width:58px;margin-top:6px}.page-field input{width:52px}";
   shadow.append(extraStyle);
   let selectedTags = [],
-    tagOptions = [];
+    tagOptions = [],
+    tagMenuOpen = false;
   const tagLabel = shadow.querySelectorAll("label")[1],
     tagControl = document.createElement("div"),
     tagInput = document.createElement("input"),
@@ -112,7 +195,7 @@ async function showPopup(selection) {
         return row;
       }),
     );
-    tagMenu.classList.toggle("hidden", !matches.length);
+    tagMenu.classList.toggle("hidden", !tagMenuOpen || !matches.length);
   };
   const addTag = () => {
     const name = tagInput.value.trim().toLowerCase();
@@ -121,8 +204,14 @@ async function showPopup(selection) {
     renderTags();
   };
   tagInput.onfocus = () => {
-    tagMenu.classList.remove("hidden");
+    tagMenuOpen = true;
     renderTags();
+  };
+  tagInput.onblur = () => {
+    setTimeout(() => {
+      tagMenuOpen = false;
+      renderTags();
+    }, 120);
   };
   tagInput.oninput = renderTags;
   tagInput.onkeydown = (event) => {
@@ -144,11 +233,11 @@ async function showPopup(selection) {
   });
   const pageLabel = document.createElement("label");
   pageLabel.className = "page-field";
-  pageLabel.textContent = "Page number (optional)";
+  pageLabel.textContent = "Page";
   const pageInput = document.createElement("input");
   pageInput.className = "page-number";
   pageLabel.append(pageInput);
-  shadow.querySelector(".row").after(pageLabel);
+  shadow.querySelector(".row").append(pageLabel);
   const saveButton = shadow.querySelector(".save");
   saveButton.onclick = async () => {
     const button = shadow.querySelector(".save"),
@@ -182,11 +271,11 @@ async function showPopup(selection) {
     } catch (error) {
       message.textContent = error.message;
       button.disabled = false;
-      button.textContent = "Save annotation";
+      button.textContent = "Save excerpt";
     }
   };
   document.documentElement.appendChild(marginaliaHost);
-  shadow.querySelector("textarea").focus();
+  positionPopup();
   shadow.querySelector(".box").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
@@ -194,16 +283,17 @@ async function showPopup(selection) {
     }
   });
 }
-function queueSelection() {
+function queueSelection(delay = 0) {
   clearTimeout(selectionTimer);
   selectionTimer = setTimeout(() => {
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) showPopup(selection);
-  }, 120);
+  }, delay);
 }
 document.addEventListener(
   "mouseup",
   (event) => {
+    isPointerSelecting = false;
     if (!event.composedPath().includes(marginaliaHost)) queueSelection();
   },
   { capture: true },
@@ -216,7 +306,9 @@ document.addEventListener(
   },
   { capture: true },
 );
-document.addEventListener("selectionchange", queueSelection);
+document.addEventListener("selectionchange", () => {
+  if (!isPointerSelecting) queueSelection();
+});
 document.addEventListener(
   "mousedown",
   (event) => {
@@ -224,6 +316,17 @@ document.addEventListener(
       removePopup();
       lastSelection = "";
     }
+    if (!event.composedPath().includes(marginaliaHost)) {
+      isPointerSelecting = true;
+      clearTimeout(selectionTimer);
+    }
   },
   { capture: true },
 );
+window.addEventListener("scroll", queuePosition, { passive: true });
+window.addEventListener("resize", queuePosition, { passive: true });
+syncDashboardTheme();
+new MutationObserver(syncDashboardTheme).observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ["data-theme"],
+});

@@ -9,6 +9,10 @@
     "lint": "next lint",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:rename-excerpts": "prisma db execute --file prisma/rename-annotations-to-excerpts.sql",
+    "db:remove-quote-type": "prisma db execute --file prisma/remove-quote-excerpt-type.sql",
+    "db:add-bibliography-annotation": "prisma db execute --file prisma/add-source-bibliography-annotation.sql",
+    "db:add-bibliography-toggle": "prisma db execute --file prisma/add-source-bibliography-toggle.sql",
     "db:push": "prisma db push",
     "db:studio": "prisma studio"
   },

@@ -24,7 +24,7 @@ export const createProject = (name) =>
 export const saveSource = (source) =>
   api("/api/sources", { method: "POST", body: JSON.stringify(source) });
 export const saveAnnotation = (annotation) =>
-  api("/api/annotations", { method: "POST", body: JSON.stringify(annotation) });
+  api("/api/excerpts", { method: "POST", body: JSON.stringify(annotation) });
 export const checkDuplicate = ({ url, doi, canonicalUrl }) => {
   const query = new URLSearchParams({ url });
   if (doi) query.set("doi", doi);

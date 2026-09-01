@@ -22,8 +22,7 @@ enum CaptureMethod {
   IMPORT
 }
 
-enum AnnotationType {
-  QUOTE
+enum ExcerptType {
   EVIDENCE
   SUMMARY
   QUESTION
@@ -32,41 +31,43 @@ enum AnnotationType {
 }
 
 model User {
-  id          String       @id
-  email       String       @unique
+  id          String    @id
+  email       String    @unique
   displayName String?
   sources     Source[]
   projects    Project[]
   tags        Tag[]
-  annotations Annotation[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  excerpts    Excerpt[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model Source {
-  id                 String          @id @default(cuid())
-  userId             String
-  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title              String
-  authors            String?
-  organization       String?
-  publicationDate    DateTime?
-  sourceType         SourceType
-  url                String
-  canonicalUrl       String?
-  normalizedUrl      String
-  doi                String?
-  description        String?
-  notes              String?
-  citationMetadata   Json?
-  captureMethod      CaptureMethod   @default(MANUAL)
-  metadataNeedsReview Boolean         @default(false)
-  fileUrl             String?
-  projects           ProjectSource[]
-  tags                SourceTag[]
-  annotations         Annotation[]
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  id                     String          @id @default(cuid())
+  userId                 String
+  user                   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                  String
+  authors                String?
+  organization           String?
+  publicationDate        DateTime?
+  sourceType             SourceType
+  url                    String
+  canonicalUrl           String?
+  normalizedUrl          String
+  doi                    String?
+  description            String?
+  bibliographyAnnotation String?
+  includeInBibliography  Boolean         @default(true)
+  notes                  String?
+  citationMetadata       Json?
+  captureMethod          CaptureMethod   @default(MANUAL)
+  metadataNeedsReview    Boolean         @default(false)
+  fileUrl                String?
+  projects               ProjectSource[]
+  tags                   SourceTag[]
+  excerpts               Excerpt[]
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
 
   @@unique([userId, doi])
   @@unique([userId, canonicalUrl])
@@ -76,52 +77,55 @@ model Source {
 }
 
 model Project {
-  id          String              @id @default(cuid())
+  id          String           @id @default(cuid())
   userId      String
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   description String?
   color       String?
   archivedAt  DateTime?
+  isActive    Boolean          @default(true)
+  deletedAt   DateTime?
   sources     ProjectSource[]
-  annotations AnnotationProject[]
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  excerpts    ExcerptProject[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   @@unique([userId, name])
   @@index([userId, updatedAt(sort: Desc)])
+  @@index([userId, deletedAt, isActive])
 }
 
 model Tag {
-  id          String          @id @default(cuid())
-  userId      String
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  color       String?
-  sources     SourceTag[]
-  annotations AnnotationTag[]
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  color     String?
+  sources   SourceTag[]
+  excerpts  ExcerptTag[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   @@unique([userId, name])
 }
 
-model Annotation {
-  id              String              @id @default(cuid())
+model Excerpt {
+  id              String           @id @default(cuid())
   userId          String
-  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   sourceId        String
-  source          Source              @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  source          Source           @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   selectedText    String
   surroundingText String?
   note            String?
   pageUrl         String
-  annotationType  AnnotationType
+  excerptType     ExcerptType
   locationData    Json?
-  projects        AnnotationProject[]
-  tags            AnnotationTag[]
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  projects        ExcerptProject[]
+  tags            ExcerptTag[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([sourceId, createdAt(sort: Desc)])
@@ -130,8 +134,8 @@ model Annotation {
 model ProjectSource {
   projectId String
   sourceId  String
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  source    Source  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source    Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   addedAt   DateTime @default(now())
 
   @@id([projectId, sourceId])
@@ -148,22 +152,22 @@ model SourceTag {
   @@index([tagId])
 }
 
-model AnnotationProject {
-  annotationId String
-  projectId    String
-  annotation   Annotation @relation(fields: [annotationId], references: [id], onDelete: Cascade)
-  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+model ExcerptProject {
+  excerptId String
+  projectId String
+  excerpt   Excerpt @relation(fields: [excerptId], references: [id], onDelete: Cascade)
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@id([annotationId, projectId])
+  @@id([excerptId, projectId])
   @@index([projectId])
 }
 
-model AnnotationTag {
-  annotationId String
-  tagId        String
-  annotation   Annotation @relation(fields: [annotationId], references: [id], onDelete: Cascade)
-  tag          Tag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+model ExcerptTag {
+  excerptId String
+  tagId     String
+  excerpt   Excerpt @relation(fields: [excerptId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
-  @@id([annotationId, tagId])
+  @@id([excerptId, tagId])
   @@index([tagId])
 }

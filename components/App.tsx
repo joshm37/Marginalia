@@ -1,25 +1,34 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
+  Archive,
+  ArrowLeft,
   ArrowRight,
   BookOpen,
   BookmarkPlus,
   ChevronDown,
   ExternalLink,
   FileText,
+  Filter,
   FolderOpen,
   Highlighter,
   Home,
   Library,
+  Layers3,
+  Link2,
   LogOut,
+  MoreHorizontal,
   Moon,
+  Pencil,
   Plus,
   Search,
   Settings,
   Sun,
   Tag,
   Trash2,
+  RotateCcw,
   Copy,
   X,
 } from "lucide-react";
@@ -55,14 +64,30 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [accountMenu, setAccountMenu] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState("Dashboard");
   const [query, setQuery] = useState("");
+  const [searchedTag, setSearchedTag] = useState<string | null>(null);
   const [modal, setModal] = useState<
     "source" | "annotation" | "project" | null
   >(null);
   const [selectedSource, setSelectedSource] = useState<Source | null>(null);
+  const [editingSource, setEditingSource] = useState<Source | null>(null);
+  const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(
+    null,
+  );
+  const [annotationDefaults, setAnnotationDefaults] = useState<{
+    sourceId?: string;
+    projectId?: string;
+  }>({});
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [projectBackView, setProjectBackView] = useState("Projects");
+  const [sourceBackView, setSourceBackView] = useState("Sources");
   const [toast, setToast] = useState("");
   const [sourceType, setSourceType] = useState<SourceType | "All">("All");
 
@@ -75,7 +100,7 @@ export default function App() {
           throw new Error(data.error ?? "Could not load your workspace");
         setSources(data.sources);
         setProjects(data.projects);
-        setAnnotations(data.annotations);
+        setAnnotations(data.excerpts);
         setUser(data.user);
         setLoadError("");
       } catch (error) {
@@ -125,22 +150,97 @@ export default function App() {
     };
   }, [accountMenu]);
 
-  const filteredSources = useMemo(() => {
-    const q = query.toLowerCase().trim();
-    return sources.filter(
-      (s) =>
-        (sourceType === "All" || s.type === sourceType) &&
-        (!q ||
-          [s.title, s.authors, s.organization, s.description, ...s.tags]
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (!searchRef.current?.contains(event.target as Node))
+        setSearchOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        setSearchOpen(true);
+      }
+      if (event.key === "Escape") {
+        setSearchOpen(false);
+        searchInputRef.current?.blur();
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  const searchResults = useMemo(() => {
+    const value = query.trim().toLowerCase();
+    if (!value) return { sources: [], projects: [], tags: [] };
+    const tags = [
+      ...new Set([
+        ...sources.flatMap((source) => source.tags),
+        ...annotations.flatMap((excerpt) => excerpt.tags),
+      ]),
+    ];
+    return {
+      sources: sources
+        .filter((source) =>
+          [
+            source.title,
+            source.authors,
+            source.organization,
+            source.description,
+            source.bibliographyAnnotation,
+            ...source.tags,
+          ]
             .join(" ")
             .toLowerCase()
-            .includes(q)),
-    );
-  }, [sources, query, sourceType]);
+            .includes(value),
+        )
+        .slice(0, 5),
+      projects: projects
+        .filter(
+          (project) =>
+            !project.deletedAt &&
+            [project.name, project.description]
+              .join(" ")
+              .toLowerCase()
+              .includes(value),
+        )
+        .slice(0, 5),
+      tags: tags
+        .filter((tag) => tag.toLowerCase().includes(value))
+        .sort()
+        .slice(0, 8),
+    };
+  }, [annotations, projects, query, sources]);
+
+  function finishSearch() {
+    setQuery("");
+    setSearchOpen(false);
+    searchInputRef.current?.blur();
+  }
 
   function notify(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 2200);
+  }
+  function navigate(nextView: string) {
+    setSelectedSource(null);
+    if (nextView !== "Project") setSelectedProject(null);
+    setView(nextView);
+  }
+  function openProject(project: Project) {
+    setProjectBackView(view);
+    setSelectedProject(project);
+    setSelectedSource(null);
+    setView("Project");
+  }
+  function openSource(source: Source) {
+    setSourceBackView(view);
+    setSelectedSource(source);
+    setView("Source");
   }
   async function deleteSource(id: string) {
     const response = await fetch(`/api/sources/${id}`, { method: "DELETE" });
@@ -149,9 +249,79 @@ export default function App() {
     setAnnotations((prev) => prev.filter((a) => a.sourceId !== id));
     notify("Source deleted");
   }
+  async function updateProjectState(
+    project: Project,
+    action: "unarchive" | "archive",
+  ) {
+    const response = await fetch(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok)
+      return notify(data.error ?? "Could not update the project");
+    setProjects((current) =>
+      current.map((item) => (item.id === data.id ? data : item)),
+    );
+    if (selectedProject?.id === data.id) setSelectedProject(data);
+    notify(action === "unarchive" ? "Project unarchived" : "Project archived");
+  }
+  async function permanentlyDeleteProject(project: Project) {
+    const response = await fetch(`/api/projects/${project.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      const data = await readJsonResponse(response);
+      return notify(data.error ?? "Could not permanently delete the project");
+    }
+    setProjects((current) => current.filter((item) => item.id !== project.id));
+    setProjectToDelete(null);
+    if (selectedProject?.id === project.id) navigate(projectBackView);
+    notify("Project permanently deleted");
+  }
   function copyCitation(source: Source) {
     navigator.clipboard?.writeText(citation(source, "APA"));
     notify("APA citation copied");
+  }
+  function copyAnnotation(annotation: Annotation) {
+    navigator.clipboard?.writeText(annotation.selectedText);
+    notify("Excerpt copied");
+  }
+  async function updateBibliographyAnnotation(
+    source: Source,
+    bibliographyAnnotation: string,
+    includeInBibliography: boolean,
+  ) {
+    const response = await fetch(`/api/sources/${source.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "updateBibliographyAnnotation",
+        bibliographyAnnotation,
+        includeInBibliography,
+      }),
+    });
+    const saved = await readJsonResponse(response);
+    if (!response.ok)
+      throw new Error(saved.error ?? "Could not update annotation");
+    setSources((current) =>
+      current.map((item) => (item.id === saved.id ? saved : item)),
+    );
+    if (selectedSource?.id === saved.id) setSelectedSource(saved);
+    return saved as Source;
+  }
+  async function deleteAnnotation(annotation: Annotation) {
+    if (!window.confirm("Delete this excerpt? This cannot be undone.")) return;
+    const response = await fetch(`/api/excerpts/${annotation.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) return notify("Could not delete excerpt");
+    setAnnotations((current) =>
+      current.filter((item) => item.id !== annotation.id),
+    );
+    if (editingAnnotation?.id === annotation.id) setEditingAnnotation(null);
+    notify("Excerpt deleted");
   }
 
   if (loading)
@@ -191,43 +361,60 @@ export default function App() {
           <div className="section-label">Workspace</div>
           <button
             className={view === "Dashboard" ? "active" : ""}
-            onClick={() => setView("Dashboard")}
+            onClick={() => navigate("Dashboard")}
           >
             <Home size={16} />
             <span>Dashboard</span>
           </button>
           <button
-            className={view === "Projects" ? "active" : ""}
-            onClick={() => setView("Projects")}
+            className={
+              view === "Projects" ||
+              (view === "Project" && projectBackView !== "Archived")
+                ? "active"
+                : ""
+            }
+            onClick={() => navigate("Projects")}
           >
             <FolderOpen size={16} />
             <span>Projects</span>
           </button>
           <button
-            className={view === "Sources" ? "active" : ""}
-            onClick={() => setView("Sources")}
+            className={view === "Sources" || view === "Source" ? "active" : ""}
+            onClick={() => navigate("Sources")}
           >
             <Library size={16} />
             <span>Sources</span>
           </button>
           <button
             className={view === "Annotations" ? "active" : ""}
-            onClick={() => setView("Annotations")}
+            onClick={() => navigate("Annotations")}
           >
             <Highlighter size={16} />
-            <span>Annotations</span>
+            <span>Excerpts</span>
           </button>
           <div className="section-label">Manage</div>
           <button
             className={view === "Tags" ? "active" : ""}
-            onClick={() => setView("Tags")}
+            onClick={() => navigate("Tags")}
           >
             <Tag size={16} />
             <span>Tags</span>
           </button>
           <button
+            className={
+              view === "Archived" ||
+              (view === "Project" && projectBackView === "Archived")
+                ? "active"
+                : ""
+            }
+            onClick={() => navigate("Archived")}
+          >
+            <Archive size={16} />
+            <span>Archived</span>
+          </button>
+          <button
             className={view === "Settings" ? "active" : ""}
-            onClick={() => setView("Settings")}
+            onClick={() => navigate("Settings")}
           >
             <Settings size={16} />
             <span>Settings</span>
@@ -250,19 +437,41 @@ export default function App() {
 
       <main className="main">
         <header className="topbar">
-          <div className="search">
+          <div className="search" ref={searchRef}>
             <Search size={16} />
             <input
+              ref={searchInputRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setView("Sources")}
-              aria-label="Search your research"
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setSearchOpen(true);
+              }}
+              onFocus={() => setSearchOpen(true)}
+              aria-label="Search projects, sources, and tags"
             />
             <kbd>⌘ K</kbd>
+            {searchOpen && query.trim() && (
+              <UniversalSearchResults
+                results={searchResults}
+                onSource={(source) => {
+                  openSource(source);
+                  finishSearch();
+                }}
+                onProject={(project) => {
+                  openProject(project);
+                  finishSearch();
+                }}
+                onTag={(tag) => {
+                  setSearchedTag(tag);
+                  navigate("Tags");
+                  finishSearch();
+                }}
+              />
+            )}
           </div>
           <div className="topbar-actions">
-            <button className="btn primary" onClick={() => setModal("project")}>
-              <Plus size={16} /> Create project
+            <button className="btn primary" onClick={() => setModal("source")}>
+              <BookmarkPlus size={16} /> Save a source
             </button>
             <div className="account" ref={accountRef}>
               <button
@@ -307,7 +516,7 @@ export default function App() {
                   </button>
                   <button
                     onClick={() => {
-                      setView("Settings");
+                      navigate("Settings");
                       setAccountMenu(false);
                     }}
                   >
@@ -338,19 +547,22 @@ export default function App() {
               sources={sources}
               projects={projects}
               annotations={annotations}
-              onSource={setSelectedSource}
-              onAddSource={() => setModal("source")}
-              onNavigate={setView}
+              onSource={openSource}
+              onProject={openProject}
+              onAddProject={() => setModal("project")}
+              onNavigate={navigate}
             />
           )}
           {view === "Sources" && (
             <SourcesView
-              sources={filteredSources}
+              sources={sources}
+              projects={projects}
               activeType={sourceType}
               onType={setSourceType}
-              onSource={setSelectedSource}
+              onSource={openSource}
               onDelete={deleteSource}
               onCopy={copyCitation}
+              onEdit={setEditingSource}
               onAdd={() => setModal("source")}
             />
           )}
@@ -358,7 +570,15 @@ export default function App() {
             <AnnotationsView
               annotations={annotations}
               sources={sources}
-              onAdd={() => setModal("annotation")}
+              projects={projects}
+              onSource={openSource}
+              onCopy={copyAnnotation}
+              onEdit={setEditingAnnotation}
+              onDelete={deleteAnnotation}
+              onAdd={() => {
+                setAnnotationDefaults({});
+                setModal("annotation");
+              }}
             />
           )}
           {view === "Projects" && (
@@ -367,10 +587,104 @@ export default function App() {
               sources={sources}
               annotations={annotations}
               onAdd={() => setModal("project")}
+              onProject={openProject}
+              onState={updateProjectState}
+              onRequestDelete={setProjectToDelete}
+            />
+          )}
+          {view === "Project" && selectedProject && (
+            <ProjectDetail
+              project={selectedProject}
+              sources={sources.filter((source) =>
+                source.projects.includes(selectedProject.id),
+              )}
+              annotations={annotations}
+              onBack={() => navigate(projectBackView)}
+              onSource={openSource}
+              onAddSource={() => setModal("source")}
+              onState={updateProjectState}
+              onRequestDelete={setProjectToDelete}
+            />
+          )}
+          {view === "Source" && selectedSource && (
+            <SourceDetail
+              source={selectedSource}
+              annotations={annotations.filter(
+                (annotation) => annotation.sourceId === selectedSource.id,
+              )}
+              onEdit={() => setEditingSource(selectedSource)}
+              onSaveBibliography={async (bibliographyAnnotation, include) => {
+                try {
+                  await updateBibliographyAnnotation(
+                    selectedSource,
+                    bibliographyAnnotation,
+                    include,
+                  );
+                  notify("Bibliography annotation saved");
+                } catch (error) {
+                  notify(
+                    error instanceof Error
+                      ? error.message
+                      : "Could not save annotation",
+                  );
+                  throw error;
+                }
+              }}
+              onToggleBibliography={async (include) => {
+                try {
+                  await updateBibliographyAnnotation(
+                    selectedSource,
+                    selectedSource.bibliographyAnnotation || "",
+                    include,
+                  );
+                  notify(
+                    include
+                      ? "Included in bibliography"
+                      : "Excluded from bibliography",
+                  );
+                } catch (error) {
+                  notify(
+                    error instanceof Error
+                      ? error.message
+                      : "Could not update bibliography",
+                  );
+                }
+              }}
+              onCopyAnnotation={copyAnnotation}
+              onEditAnnotation={setEditingAnnotation}
+              onDeleteAnnotation={deleteAnnotation}
+              onAddAnnotation={() => {
+                setAnnotationDefaults({
+                  sourceId: selectedSource.id,
+                  projectId: selectedSource.projects[0],
+                });
+                setModal("annotation");
+              }}
+              onBack={() => {
+                setSelectedSource(null);
+                setView(sourceBackView);
+              }}
             />
           )}
           {view === "Tags" && (
-            <TagsView sources={sources} annotations={annotations} />
+            <TagsView
+              sources={sources}
+              annotations={annotations}
+              initialTag={searchedTag}
+              onSource={openSource}
+            />
+          )}
+          {view === "Archived" && (
+            <ArchivedProjectsView
+              projects={projects.filter(
+                (project) => !project.deletedAt && !project.isActive,
+              )}
+              sources={sources}
+              annotations={annotations}
+              onProject={openProject}
+              onState={updateProjectState}
+              onRequestDelete={setProjectToDelete}
+            />
           )}
           {view === "Settings" && (
             <SettingsView
@@ -389,19 +703,68 @@ export default function App() {
         </div>
       </main>
 
-      {selectedSource && (
-        <SourceDetail
-          source={selectedSource}
-          annotations={annotations.filter(
-            (a) => a.sourceId === selectedSource.id,
-          )}
-          onClose={() => setSelectedSource(null)}
-          onCopy={() => copyCitation(selectedSource)}
+      {projectToDelete && (
+        <ProjectDeleteModal
+          project={projectToDelete}
+          onClose={() => setProjectToDelete(null)}
+          onConfirm={() => permanentlyDeleteProject(projectToDelete)}
         />
       )}
+
+      {editingSource && (
+        <SourceModal
+          projects={projects.filter((project) => !project.deletedAt)}
+          initialSource={editingSource}
+          onCreateProject={async (name) => {
+            const saved = await postJson<Project>("/api/projects", {
+              name,
+              description: "",
+            });
+            setProjects((prev) => [saved, ...prev]);
+            notify("Project created");
+            return saved;
+          }}
+          onClose={() => setEditingSource(null)}
+          onSave={async (source) => {
+            try {
+              const response = await fetch(`/api/sources/${editingSource.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(source),
+              });
+              const saved = await readJsonResponse(response);
+              if (!response.ok)
+                throw new Error(saved.error ?? "Could not update source");
+              setSources((current) =>
+                current.map((item) => (item.id === saved.id ? saved : item)),
+              );
+              setAnnotations((current) =>
+                current.map((annotation) =>
+                  annotation.sourceId === saved.id
+                    ? { ...annotation, projects: saved.projects }
+                    : annotation,
+                ),
+              );
+              setSelectedSource(saved);
+              setEditingSource(null);
+              notify("Source updated");
+            } catch (error) {
+              notify(
+                error instanceof Error
+                  ? error.message
+                  : "Could not update source",
+              );
+            }
+          }}
+        />
+      )}
+
       {modal === "source" && (
         <SourceModal
-          projects={projects}
+          projects={projects.filter((project) => !project.deletedAt)}
+          initialProjectId={
+            view === "Project" ? selectedProject?.id : undefined
+          }
           onCreateProject={async (name) => {
             const saved = await postJson<Project>("/api/projects", {
               name,
@@ -431,12 +794,14 @@ export default function App() {
       {modal === "annotation" && (
         <AnnotationModal
           sources={sources}
-          projects={projects}
+          projects={projects.filter((project) => !project.deletedAt)}
+          initialSourceId={annotationDefaults.sourceId}
+          initialProjectId={annotationDefaults.projectId}
           onClose={() => setModal(null)}
           onSave={async (a) => {
             try {
               const source = sources.find((item) => item.id === a.sourceId);
-              const saved = await postJson<Annotation>("/api/annotations", {
+              const saved = await postJson<Annotation>("/api/excerpts", {
                 ...a,
                 pageUrl: source?.url,
                 locationData: a.pageNumber
@@ -445,12 +810,55 @@ export default function App() {
               });
               setAnnotations((prev) => [saved, ...prev]);
               setModal(null);
-              notify("Annotation saved");
+              notify("Excerpt saved");
             } catch (error) {
               notify(
                 error instanceof Error
                   ? error.message
-                  : "Could not save annotation",
+                  : "Could not save excerpt",
+              );
+            }
+          }}
+        />
+      )}
+      {editingAnnotation && (
+        <AnnotationModal
+          sources={sources}
+          projects={projects.filter((project) => !project.deletedAt)}
+          initialAnnotation={editingAnnotation}
+          onClose={() => setEditingAnnotation(null)}
+          onSave={async (annotation) => {
+            try {
+              const source = sources.find(
+                (item) => item.id === annotation.sourceId,
+              );
+              const response = await fetch(
+                `/api/excerpts/${editingAnnotation.id}`,
+                {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    ...annotation,
+                    pageUrl: source?.url,
+                    locationData: {
+                      pageNumber: annotation.pageNumber || null,
+                    },
+                  }),
+                },
+              );
+              const saved = await readJsonResponse(response);
+              if (!response.ok)
+                throw new Error(saved.error ?? "Could not update excerpt");
+              setAnnotations((current) =>
+                current.map((item) => (item.id === saved.id ? saved : item)),
+              );
+              setEditingAnnotation(null);
+              notify("Excerpt updated");
+            } catch (error) {
+              notify(
+                error instanceof Error
+                  ? error.message
+                  : "Could not update excerpt",
               );
             }
           }}
@@ -508,13 +916,91 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return data;
 }
 
+function UniversalSearchResults({
+  results,
+  onSource,
+  onProject,
+  onTag,
+}: {
+  results: { sources: Source[]; projects: Project[]; tags: string[] };
+  onSource: (source: Source) => void;
+  onProject: (project: Project) => void;
+  onTag: (tag: string) => void;
+}) {
+  const hasResults =
+    results.sources.length || results.projects.length || results.tags.length;
+  return (
+    <div className="universal-search-results">
+      {results.projects.length > 0 && (
+        <SearchResultGroup title="Projects">
+          {results.projects.map((project) => (
+            <button key={project.id} onClick={() => onProject(project)}>
+              <FolderOpen size={15} />
+              <span>
+                <strong>{project.name}</strong>
+                {project.description && <small>{project.description}</small>}
+              </span>
+            </button>
+          ))}
+        </SearchResultGroup>
+      )}
+      {results.sources.length > 0 && (
+        <SearchResultGroup title="Sources">
+          {results.sources.map((source) => (
+            <button key={source.id} onClick={() => onSource(source)}>
+              <FileText size={15} />
+              <span>
+                <strong>{source.title}</strong>
+                <small>{source.authors || source.organization}</small>
+              </span>
+            </button>
+          ))}
+        </SearchResultGroup>
+      )}
+      {results.tags.length > 0 && (
+        <SearchResultGroup title="Tags">
+          {results.tags.map((tag) => (
+            <button key={tag} onClick={() => onTag(tag)}>
+              <Tag size={15} />
+              <span>
+                <strong>#{tag}</strong>
+              </span>
+            </button>
+          ))}
+        </SearchResultGroup>
+      )}
+      {!hasResults && (
+        <div className="universal-search-empty">
+          No matching research found.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SearchResultGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="search-result-group">
+      <div>{title}</div>
+      {children}
+    </section>
+  );
+}
+
 function Dashboard({
   userName,
   sources,
   projects,
   annotations,
   onSource,
-  onAddSource,
+  onProject,
+  onAddProject,
   onNavigate,
 }: {
   userName: string;
@@ -522,9 +1008,13 @@ function Dashboard({
   projects: Project[];
   annotations: Annotation[];
   onSource: (s: Source) => void;
-  onAddSource: () => void;
+  onProject: (project: Project) => void;
+  onAddProject: () => void;
   onNavigate: (view: string) => void;
 }) {
+  const activeProjects = projects.filter(
+    (project) => project.isActive && !project.deletedAt,
+  );
   return (
     <>
       <div className="page-title hero-title">
@@ -538,8 +1028,8 @@ function Dashboard({
             research.
           </p>
         </div>
-        <button className="btn primary" onClick={onAddSource}>
-          <BookmarkPlus size={16} /> Save a source
+        <button className="btn primary" onClick={onAddProject}>
+          <Plus size={16} /> Create project
         </button>
       </div>
       <div className="dashboard-priority">
@@ -547,11 +1037,13 @@ function Dashboard({
           <div className="card-header">
             <div className="section-heading">
               <span className="section-heading-icon">
-                <FolderOpen size={15} />
+                <Layers3 size={15} />
               </span>
               <div>
                 <h3>Active projects</h3>
-                <p>Your research in progress · {projects.length} active</p>
+                <p>
+                  Your research in progress · {activeProjects.length} active
+                </p>
               </div>
             </div>
             <button
@@ -562,11 +1054,11 @@ function Dashboard({
             </button>
           </div>
           <div className="project-showcase">
-            {projects.map((p, index) => (
+            {activeProjects.map((p, index) => (
               <button
                 className="project project-feature"
                 key={p.id}
-                onClick={() => onNavigate("Projects")}
+                onClick={() => onProject(p)}
               >
                 <span className={`project-mark mark-${index + 1}`}>
                   <FolderOpen size={17} />
@@ -587,6 +1079,11 @@ function Dashboard({
                 <ArrowRight size={14} />
               </button>
             ))}
+            {!activeProjects.length && (
+              <div className="project-showcase-empty">
+                No active projects. Mark one active from the Projects page.
+              </div>
+            )}
           </div>
         </section>
         <div className="dashboard-secondary">
@@ -641,7 +1138,7 @@ function Dashboard({
                   <Highlighter size={15} />
                 </span>
                 <div>
-                  <h3>Recent annotations</h3>
+                  <h3>Recent excerpts</h3>
                   <p>Your latest evidence and notes</p>
                 </div>
               </div>
@@ -649,7 +1146,7 @@ function Dashboard({
                 className="text-button"
                 onClick={() => onNavigate("Annotations")}
               >
-                View annotations <ArrowRight size={14} />
+                View excerpts <ArrowRight size={14} />
               </button>
             </div>
             {annotations.slice(0, 4).map((a) => (
@@ -670,21 +1167,94 @@ function Dashboard({
 
 function SourcesView({
   sources,
+  projects,
   activeType,
   onType,
   onSource,
   onDelete,
   onCopy,
+  onEdit,
   onAdd,
 }: {
   sources: Source[];
+  projects: Project[];
   activeType: SourceType | "All";
   onType: (type: SourceType | "All") => void;
   onSource: (s: Source) => void;
   onDelete: (id: string) => void;
   onCopy: (s: Source) => void;
+  onEdit: (source: Source) => void;
   onAdd: () => void;
 }) {
+  const [sourceQuery, setSourceQuery] = useState("");
+  const [projectFilter, setProjectFilter] = useState("All");
+  const [tagFilter, setTagFilter] = useState("All");
+  const [sortBy, setSortBy] = useState("newest");
+  const sourceTags = [
+    ...new Set(sources.flatMap((source) => source.tags)),
+  ].sort();
+  const sourceProjects = projects
+    .filter((project) =>
+      sources.some((source) => source.projects.includes(project.id)),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const projectMap = new Map(projects.map((project) => [project.id, project]));
+  const visibleSources = useMemo(() => {
+    const value = sourceQuery.trim().toLowerCase();
+    return sources
+      .filter(
+        (source) =>
+          (activeType === "All" || source.type === activeType) &&
+          (projectFilter === "All" ||
+            source.projects.includes(projectFilter)) &&
+          (tagFilter === "All" || source.tags.includes(tagFilter)) &&
+          (!value ||
+            [
+              source.title,
+              source.authors,
+              source.organization,
+              source.description,
+              source.bibliographyAnnotation,
+              ...source.tags,
+            ]
+              .join(" ")
+              .toLowerCase()
+              .includes(value)),
+      )
+      .sort((a, b) => {
+        if (sortBy === "oldest") return a.createdAt.localeCompare(b.createdAt);
+        if (sortBy === "title") return a.title.localeCompare(b.title);
+        if (sortBy === "author")
+          return (a.authors || a.organization).localeCompare(
+            b.authors || b.organization,
+          );
+        if (sortBy === "publication") return b.date.localeCompare(a.date);
+        if (sortBy === "project")
+          return (projectMap.get(a.projects[0])?.name || "").localeCompare(
+            projectMap.get(b.projects[0])?.name || "",
+          );
+        if (sortBy === "tag")
+          return (a.tags[0] || "").localeCompare(b.tags[0] || "");
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+  }, [
+    activeType,
+    projectFilter,
+    projectMap,
+    sortBy,
+    sourceQuery,
+    sources,
+    tagFilter,
+  ]);
+  const hasSourceFilters = Boolean(
+    sourceQuery || projectFilter !== "All" || tagFilter !== "All",
+  );
+  function clearSourceFilters() {
+    setSourceQuery("");
+    setProjectFilter("All");
+    setTagFilter("All");
+    onType("All");
+  }
   return (
     <>
       <div className="page-title">
@@ -694,7 +1264,7 @@ function SourcesView({
           <p>Review, organize, and cite everything you have collected.</p>
         </div>
         <button className="btn primary" onClick={onAdd}>
-          <Plus size={16} /> Add source
+          <Plus size={16} /> New source
         </button>
       </div>
       <div className="toolbar">
@@ -709,8 +1279,69 @@ function SourcesView({
           </button>
         ))}
       </div>
-      {sources.length ? (
-        sources.map((s) => (
+      <section className="card source-library-controls">
+        <div className="source-library-search">
+          <Search size={15} />
+          <input
+            value={sourceQuery}
+            onChange={(event) => setSourceQuery(event.target.value)}
+            aria-label="Search sources"
+          />
+        </div>
+        <label>
+          <span>Project</span>
+          <select
+            value={projectFilter}
+            onChange={(event) => setProjectFilter(event.target.value)}
+          >
+            <option>All</option>
+            {sourceProjects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Tag</span>
+          <select
+            value={tagFilter}
+            onChange={(event) => setTagFilter(event.target.value)}
+          >
+            <option>All</option>
+            {sourceTags.map((tag) => (
+              <option key={tag}>{tag}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Sort</span>
+          <select
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value)}
+          >
+            <option value="newest">Recently saved</option>
+            <option value="oldest">Oldest saved</option>
+            <option value="title">Title A–Z</option>
+            <option value="author">Author A–Z</option>
+            <option value="publication">Publication date</option>
+            <option value="project">Project A–Z</option>
+            <option value="tag">Tag A–Z</option>
+          </select>
+        </label>
+        <div className="source-results-summary">
+          <span>
+            {visibleSources.length} of {sources.length} sources
+          </span>
+          {(hasSourceFilters || activeType !== "All") && (
+            <button className="text-button" onClick={clearSourceFilters}>
+              <X size={12} /> Clear
+            </button>
+          )}
+        </div>
+      </section>
+      {visibleSources.length ? (
+        visibleSources.map((s) => (
           <div className="card source-card" key={s.id}>
             <button className="source-card-main" onClick={() => onSource(s)}>
               <span className="source-type-icon">
@@ -723,6 +1354,12 @@ function SourcesView({
                   {s.authors} · {s.organization} · {s.date}
                 </span>
                 <span className="desc">{s.description}</span>
+                {s.bibliographyAnnotation && (
+                  <span className="source-bibliography-preview">
+                    <BookOpen size={12} />
+                    {s.bibliographyAnnotation}
+                  </span>
+                )}
                 {s.tags.map((t) => (
                   <span className="pill" key={t}>
                     #{t}
@@ -731,6 +1368,13 @@ function SourcesView({
               </span>
             </button>
             <div className="source-actions">
+              <button
+                className="icon-btn"
+                title="Edit source"
+                onClick={() => onEdit(s)}
+              >
+                <Pencil size={15} />
+              </button>
               <button
                 className="icon-btn"
                 title="Copy APA citation"
@@ -761,10 +1405,17 @@ function SourcesView({
         <div className="card empty">
           <Search size={24} />
           <h3>No sources found</h3>
-          <p>Try a different search or filter, or add a new source.</p>
-          <button className="btn primary" onClick={onAdd}>
-            <Plus size={15} /> Add source
-          </button>
+          <p>Try a different search, type, project, or tag.</p>
+          {(hasSourceFilters || activeType !== "All") && (
+            <button className="btn" onClick={clearSourceFilters}>
+              Clear filters
+            </button>
+          )}
+          {!sources.length && (
+            <button className="btn primary" onClick={onAdd}>
+              <Plus size={15} /> New source
+            </button>
+          )}
         </div>
       )}
     </>
@@ -774,50 +1425,265 @@ function SourcesView({
 function AnnotationsView({
   annotations,
   sources,
+  projects,
+  onSource,
   onAdd,
+  onCopy,
+  onEdit,
+  onDelete,
 }: {
   annotations: Annotation[];
   sources: Source[];
+  projects: Project[];
+  onSource: (source: Source) => void;
   onAdd: () => void;
+  onCopy: (annotation: Annotation) => void;
+  onEdit: (annotation: Annotation) => void;
+  onDelete: (annotation: Annotation) => void;
 }) {
+  const [excerptQuery, setExcerptQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("All");
+  const [projectFilter, setProjectFilter] = useState("All");
+  const [tagFilter, setTagFilter] = useState("All");
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [sortBy, setSortBy] = useState("newest");
+  const sourceMap = new Map(sources.map((source) => [source.id, source]));
+  const projectMap = new Map(projects.map((project) => [project.id, project]));
+  const excerptSources = sources
+    .filter((source) => annotations.some((item) => item.sourceId === source.id))
+    .sort((a, b) => a.title.localeCompare(b.title));
+  const excerptProjects = projects
+    .filter((project) =>
+      annotations.some((item) => item.projects.includes(project.id)),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const excerptTags = [
+    ...new Set(annotations.flatMap((item) => item.tags)),
+  ].sort();
+  const excerptTypes = [
+    ...new Set(annotations.map((item) => item.type)),
+  ].sort();
+  const visibleExcerpts = useMemo(() => {
+    const value = excerptQuery.trim().toLowerCase();
+    const result = annotations.filter((excerpt) => {
+      const source = sourceMap.get(excerpt.sourceId);
+      return (
+        (sourceFilter === "All" || excerpt.sourceId === sourceFilter) &&
+        (projectFilter === "All" || excerpt.projects.includes(projectFilter)) &&
+        (tagFilter === "All" || excerpt.tags.includes(tagFilter)) &&
+        (typeFilter === "All" || excerpt.type === typeFilter) &&
+        (!value ||
+          [
+            excerpt.selectedText,
+            excerpt.note,
+            excerpt.type,
+            source?.title,
+            ...excerpt.tags,
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(value))
+      );
+    });
+    return result.sort((a, b) => {
+      if (sortBy === "oldest") return a.createdAt.localeCompare(b.createdAt);
+      if (sortBy === "source")
+        return (sourceMap.get(a.sourceId)?.title || "").localeCompare(
+          sourceMap.get(b.sourceId)?.title || "",
+        );
+      if (sortBy === "project")
+        return (projectMap.get(a.projects[0])?.name || "").localeCompare(
+          projectMap.get(b.projects[0])?.name || "",
+        );
+      if (sortBy === "tag")
+        return (a.tags[0] || "").localeCompare(b.tags[0] || "");
+      if (sortBy === "type") return a.type.localeCompare(b.type);
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+  }, [
+    annotations,
+    excerptQuery,
+    projectFilter,
+    projectMap,
+    sortBy,
+    sourceFilter,
+    sourceMap,
+    tagFilter,
+    typeFilter,
+  ]);
+  const hasFilters =
+    excerptQuery ||
+    sourceFilter !== "All" ||
+    projectFilter !== "All" ||
+    tagFilter !== "All" ||
+    typeFilter !== "All";
+  function clearFilters() {
+    setExcerptQuery("");
+    setSourceFilter("All");
+    setProjectFilter("All");
+    setTagFilter("All");
+    setTypeFilter("All");
+  }
   return (
     <>
       <div className="page-title">
         <div>
           <div className="kicker">Evidence library</div>
-          <h2>Annotations</h2>
+          <h2>Excerpts</h2>
           <p>
             Passages, evidence, questions, and notes captured from your
             research.
           </p>
         </div>
         <button className="btn primary" onClick={onAdd}>
-          <Plus size={16} /> New annotation
+          <Plus size={16} /> New excerpt
         </button>
       </div>
-      <div className="card">
-        {annotations.map((a) => (
-          <div className="annotation" key={a.id}>
-            <div className="annotation-top">
-              <span className="annotation-type">
-                <Highlighter size={12} />
-                {a.type}
-              </span>
-              <span className="source-meta">
-                {sources.find((s) => s.id === a.sourceId)?.title}
-              </span>
-            </div>
-            <div className="quote">{a.selectedText}</div>
-            <div className="note">{a.note}</div>
-            <div>
-              {a.tags.map((t) => (
-                <span className="pill" key={t}>
-                  #{t}
-                </span>
+      <section className="card excerpt-controls">
+        <div className="excerpt-search">
+          <Search size={15} />
+          <input
+            value={excerptQuery}
+            onChange={(event) => setExcerptQuery(event.target.value)}
+            aria-label="Search excerpts"
+          />
+        </div>
+        <div className="excerpt-filter-grid">
+          <label>
+            <span>Source</span>
+            <select
+              value={sourceFilter}
+              onChange={(event) => setSourceFilter(event.target.value)}
+            >
+              <option>All</option>
+              {excerptSources.map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.title}
+                </option>
               ))}
+            </select>
+          </label>
+          <label>
+            <span>Project</span>
+            <select
+              value={projectFilter}
+              onChange={(event) => setProjectFilter(event.target.value)}
+            >
+              <option>All</option>
+              {excerptProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Tag</span>
+            <select
+              value={tagFilter}
+              onChange={(event) => setTagFilter(event.target.value)}
+            >
+              <option>All</option>
+              {excerptTags.map((tag) => (
+                <option key={tag}>{tag}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Type</span>
+            <select
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value)}
+            >
+              <option>All</option>
+              {excerptTypes.map((type) => (
+                <option key={type}>{type}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Sort</span>
+            <select
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value)}
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="source">Source A–Z</option>
+              <option value="project">Project A–Z</option>
+              <option value="tag">Tag A–Z</option>
+              <option value="type">Type A–Z</option>
+            </select>
+          </label>
+        </div>
+        <div className="excerpt-results-summary">
+          <span>
+            {visibleExcerpts.length} of {annotations.length} excerpts
+          </span>
+          {hasFilters && (
+            <button className="text-button" onClick={clearFilters}>
+              <X size={12} /> Clear filters
+            </button>
+          )}
+        </div>
+      </section>
+      <div className="card excerpt-list">
+        {visibleExcerpts.map((a) => {
+          const source = sourceMap.get(a.sourceId);
+          const excerptProject = projectMap.get(a.projects[0]);
+          return (
+            <div className="annotation" key={a.id}>
+              <div className="annotation-top">
+                <div className="annotation-context">
+                  <span className="annotation-type">
+                    <Highlighter size={12} />
+                    {a.type}
+                  </span>
+                  {source && (
+                    <button
+                      className="excerpt-source-link"
+                      onClick={() => onSource(source)}
+                    >
+                      {source.title}
+                    </button>
+                  )}
+                </div>
+                <AnnotationActions
+                  annotation={a}
+                  onCopy={onCopy}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                />
+              </div>
+              <div className="quote">{a.selectedText}</div>
+              <div className="note">{a.note}</div>
+              <div className="excerpt-footer">
+                <div>
+                  {a.tags.map((t) => (
+                    <span className="pill" key={t}>
+                      #{t}
+                    </span>
+                  ))}
+                </div>
+                <span>
+                  {excerptProject?.name || "No project"} · {a.createdAt}
+                </span>
+              </div>
             </div>
+          );
+        })}
+        {!visibleExcerpts.length && (
+          <div className="empty excerpt-empty">
+            <Search size={23} />
+            <h3>No excerpts found</h3>
+            <p>Adjust your search or filters to see more evidence.</p>
+            {hasFilters && (
+              <button className="btn" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
           </div>
-        ))}
+        )}
       </div>
     </>
   );
@@ -828,12 +1694,36 @@ function ProjectsView({
   sources,
   annotations,
   onAdd,
+  onProject,
+  onState,
+  onRequestDelete,
 }: {
   projects: Project[];
   sources: Source[];
   annotations: Annotation[];
   onAdd: () => void;
+  onProject: (project: Project) => void;
+  onState: (
+    project: Project,
+    action: "unarchive" | "archive",
+  ) => void | Promise<void>;
+  onRequestDelete: (project: Project) => void;
 }) {
+  const [showArchived, setShowArchived] = useState(false);
+  const [projectQuery, setProjectQuery] = useState("");
+  const active = projects.filter(
+    (project) => !project.deletedAt && project.isActive,
+  );
+  const archived = projects.filter(
+    (project) => !project.deletedAt && !project.isActive,
+  );
+  const availableProjects = showArchived ? [...active, ...archived] : active;
+  const visibleProjects = availableProjects.filter((project) =>
+    [project.name, project.description]
+      .join(" ")
+      .toLowerCase()
+      .includes(projectQuery.trim().toLowerCase()),
+  );
   return (
     <>
       <div className="page-title">
@@ -841,7 +1731,7 @@ function ProjectsView({
           <div className="kicker">Workspaces</div>
           <h2>Projects</h2>
           <p>
-            Research collections that connect sources, annotations, and future
+            Research collections that connect sources, excerpts, and future
             writing.
           </p>
         </div>
@@ -849,30 +1739,322 @@ function ProjectsView({
           <Plus size={16} /> New project
         </button>
       </div>
-      <div
-        className="grid"
-        style={{ gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))" }}
-      >
-        {projects.map((p) => (
-          <div className="card" key={p.id}>
-            <div className="kicker">Project</div>
-            <h3 style={{ margin: "8px 0 6px" }}>{p.name}</h3>
-            <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.5 }}>
-              {p.description}
-            </p>
-            <div style={{ marginTop: 15 }}>
-              <span className="pill green">
-                {sources.filter((s) => s.projects.includes(p.id)).length}{" "}
-                sources
-              </span>
-              <span className="pill">
-                {annotations.filter((a) => a.projects.includes(p.id)).length}{" "}
-                annotations
-              </span>
-            </div>
+      <div className="project-tabs-row">
+        <div className="project-total">
+          {projectQuery
+            ? `${visibleProjects.length} of ${availableProjects.length} projects`
+            : `${active.length + archived.length} total projects`}
+        </div>
+        <div className="project-quick-actions">
+          <div className="project-search">
+            <Search size={14} />
+            <input
+              value={projectQuery}
+              onChange={(event) => setProjectQuery(event.target.value)}
+              aria-label="Search projects"
+            />
+            {projectQuery && (
+              <button
+                aria-label="Clear project search"
+                onClick={() => setProjectQuery("")}
+              >
+                <X size={13} />
+              </button>
+            )}
           </div>
-        ))}
+          <ProjectFilter
+            showArchived={showArchived}
+            archivedCount={archived.length}
+            onChange={setShowArchived}
+          />
+        </div>
       </div>
+      <ProjectSection
+        title="Projects"
+        description={
+          showArchived
+            ? "Active and archived research workspaces."
+            : "Active research workspaces shown on your dashboard."
+        }
+        projects={visibleProjects}
+        sources={sources}
+        annotations={annotations}
+        onProject={onProject}
+        onState={onState}
+        onRequestDelete={onRequestDelete}
+        emptyMessage={
+          projectQuery
+            ? "No projects match your search."
+            : archived.length
+              ? "No active projects. Use the filter to show archived projects."
+              : "No projects here yet."
+        }
+      />
+    </>
+  );
+}
+
+function ProjectSection({
+  title,
+  description,
+  projects,
+  sources,
+  annotations,
+  onProject,
+  onState,
+  onRequestDelete,
+  emptyMessage = "No projects here yet.",
+}: {
+  title: string;
+  description: string;
+  projects: Project[];
+  sources: Source[];
+  annotations: Annotation[];
+  onProject?: (project: Project) => void;
+  onState: (
+    project: Project,
+    action: "unarchive" | "archive",
+  ) => void | Promise<void>;
+  onRequestDelete: (project: Project) => void;
+  emptyMessage?: string;
+}) {
+  return (
+    <section className="project-section">
+      <div className="section-list-heading">
+        <div>
+          <h3>{title}</h3>
+          <p>{description}</p>
+        </div>
+      </div>
+      {projects.length ? (
+        <div className="project-library-grid">
+          {projects.map((project) => (
+            <div
+              className="card project-library-card"
+              key={project.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onProject?.(project)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onProject?.(project);
+                }
+              }}
+            >
+              <ProjectMenu
+                project={project}
+                onState={onState}
+                onRequestDelete={onRequestDelete}
+              />
+              <div className="kicker">
+                {project.isActive ? "Active project" : "Archived project"}
+              </div>
+              <h3>{project.name}</h3>
+              <p>{project.description || "Research workspace"}</p>
+              <div className="project-library-counts">
+                <span className="pill green">
+                  {
+                    sources.filter((source) =>
+                      source.projects.includes(project.id),
+                    ).length
+                  }{" "}
+                  sources
+                </span>
+                <span className="pill">
+                  {
+                    annotations.filter((annotation) =>
+                      annotation.projects.includes(project.id),
+                    ).length
+                  }{" "}
+                  excerpts
+                </span>
+              </div>
+              <ArrowRight className="project-library-arrow" size={16} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="project-section-empty">{emptyMessage}</div>
+      )}
+    </section>
+  );
+}
+
+function ProjectFilter({
+  showArchived,
+  archivedCount,
+  onChange,
+}: {
+  showArchived: boolean;
+  archivedCount: number;
+  onChange: (value: boolean) => void;
+}) {
+  const filterRef = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    function close(event: PointerEvent) {
+      if (!filterRef.current?.contains(event.target as Node))
+        filterRef.current?.removeAttribute("open");
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") filterRef.current?.removeAttribute("open");
+    }
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+  return (
+    <details
+      className="project-filter"
+      ref={filterRef}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary aria-label="Filter projects" title="Filter projects">
+        <Filter size={15} />
+        {showArchived && <span />}
+      </summary>
+      <div>
+        <div className="project-filter-heading">Filter projects</div>
+        <label>
+          <span>
+            <strong>Show archived</strong>
+            <small>{archivedCount} archived</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(event) => onChange(event.target.checked)}
+          />
+          <i className={showArchived ? "on" : ""}>
+            <b />
+          </i>
+        </label>
+      </div>
+    </details>
+  );
+}
+
+function ProjectMenu({
+  project,
+  onState,
+  onRequestDelete,
+}: {
+  project: Project;
+  onState: (
+    project: Project,
+    action: "unarchive" | "archive",
+  ) => void | Promise<void>;
+  onRequestDelete: (project: Project) => void;
+}) {
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    function close(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node))
+        menuRef.current?.removeAttribute("open");
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") menuRef.current?.removeAttribute("open");
+    }
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+  function closeMenu(event: React.MouseEvent<HTMLButtonElement>) {
+    event.currentTarget.closest("details")?.removeAttribute("open");
+  }
+  return (
+    <details
+      ref={menuRef}
+      className="project-menu"
+      onClick={(event) => event.stopPropagation()}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary aria-label={`Actions for ${project.name}`}>
+        <MoreHorizontal size={17} />
+      </summary>
+      <div>
+        <button
+          onClick={(event) => {
+            closeMenu(event);
+            onState(project, project.isActive ? "archive" : "unarchive");
+          }}
+        >
+          {project.isActive ? (
+            <>
+              <Archive size={14} /> Archive
+            </>
+          ) : (
+            <>
+              <RotateCcw size={14} /> Unarchive
+            </>
+          )}
+        </button>
+        {!project.isActive && (
+          <button
+            className="danger"
+            onClick={(event) => {
+              closeMenu(event);
+              onRequestDelete(project);
+            }}
+          >
+            <Trash2 size={14} /> Delete project
+          </button>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function ArchivedProjectsView({
+  projects,
+  sources,
+  annotations,
+  onProject,
+  onState,
+  onRequestDelete,
+}: {
+  projects: Project[];
+  sources: Source[];
+  annotations: Annotation[];
+  onProject: (project: Project) => void;
+  onState: (
+    project: Project,
+    action: "unarchive" | "archive",
+  ) => void | Promise<void>;
+  onRequestDelete: (project: Project) => void;
+}) {
+  return (
+    <>
+      <div className="page-title">
+        <div>
+          <div className="kicker">Manage</div>
+          <h2>Archived projects</h2>
+          <p>
+            Projects hidden from your dashboard but preserved in your workspace.
+          </p>
+        </div>
+      </div>
+      <ProjectSection
+        title="Archived"
+        description={`${projects.length} archived ${projects.length === 1 ? "project" : "projects"}.`}
+        projects={projects}
+        sources={sources}
+        annotations={annotations}
+        onProject={onProject}
+        onState={onState}
+        onRequestDelete={onRequestDelete}
+        emptyMessage="You have no archived projects."
+      />
     </>
   );
 }
@@ -880,34 +2062,153 @@ function ProjectsView({
 function TagsView({
   sources,
   annotations,
+  initialTag,
+  onSource,
 }: {
   sources: Source[];
   annotations: Annotation[];
+  initialTag: string | null;
+  onSource: (source: Source) => void;
 }) {
-  const tags = new Map<string, number>();
+  const [tagQuery, setTagQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState<string | null>(initialTag);
+  useEffect(() => {
+    if (initialTag) setSelectedTag(initialTag);
+  }, [initialTag]);
+  const tags = new Map<string, { sources: number; excerpts: number }>();
   sources
     .flatMap((s) => s.tags)
-    .forEach((t) => tags.set(t, (tags.get(t) || 0) + 1));
+    .forEach((tag) => {
+      const counts = tags.get(tag) || { sources: 0, excerpts: 0 };
+      tags.set(tag, { ...counts, sources: counts.sources + 1 });
+    });
   annotations
     .flatMap((a) => a.tags)
-    .forEach((t) => tags.set(t, (tags.get(t) || 0) + 1));
+    .forEach((tag) => {
+      const counts = tags.get(tag) || { sources: 0, excerpts: 0 };
+      tags.set(tag, { ...counts, excerpts: counts.excerpts + 1 });
+    });
+  const visibleTags = [...tags.entries()]
+    .filter(([tag]) =>
+      tag.toLowerCase().includes(tagQuery.toLowerCase().trim()),
+    )
+    .sort(
+      (a, b) => b[1].sources + b[1].excerpts - (a[1].sources + a[1].excerpts),
+    );
+  const taggedSources = selectedTag
+    ? sources.filter((source) => source.tags.includes(selectedTag))
+    : [];
+  const taggedExcerpts = selectedTag
+    ? annotations.filter((excerpt) => excerpt.tags.includes(selectedTag))
+    : [];
   return (
     <>
       <div className="page-title">
         <div>
           <div className="kicker">Organization</div>
           <h2>Tags</h2>
-          <p>A lightweight taxonomy for finding evidence by topic.</p>
+          <p>Explore related sources and excerpts by topic.</p>
         </div>
       </div>
-      <div className="card">
-        {[...tags.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .map(([t, n]) => (
-            <span className="pill" key={t} style={{ padding: "8px 11px" }}>
-              #{t} · {n}
-            </span>
-          ))}
+      <div className="tags-workspace">
+        <section className="card tags-browser">
+          <div className="tags-search">
+            <Search size={15} />
+            <input
+              value={tagQuery}
+              onChange={(event) => setTagQuery(event.target.value)}
+              aria-label="Search tags"
+            />
+          </div>
+          <div className="tag-grid">
+            {visibleTags.map(([tag, counts]) => (
+              <button
+                className={`tag-card ${selectedTag === tag ? "active" : ""}`}
+                key={tag}
+                onClick={() => setSelectedTag(tag)}
+              >
+                <span className="tag-card-icon">
+                  <Tag size={14} />
+                </span>
+                <strong>#{tag}</strong>
+                <small>
+                  {counts.sources} sources · {counts.excerpts} excerpts
+                </small>
+                <ArrowRight size={13} />
+              </button>
+            ))}
+            {!visibleTags.length && (
+              <div className="tags-empty">No matching tags.</div>
+            )}
+          </div>
+        </section>
+        <section className="card tag-detail">
+          {selectedTag ? (
+            <>
+              <div className="tag-detail-heading">
+                <div>
+                  <div className="kicker">Selected tag</div>
+                  <h3>#{selectedTag}</h3>
+                </div>
+                <button
+                  className="icon-btn"
+                  aria-label="Close tag details"
+                  onClick={() => setSelectedTag(null)}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+              <div className="tag-detail-section">
+                <h4>Sources</h4>
+                {taggedSources.map((source) => (
+                  <button
+                    className="tag-related-item"
+                    key={source.id}
+                    onClick={() => onSource(source)}
+                  >
+                    <FileText size={15} />
+                    <span>
+                      <strong>{source.title}</strong>
+                      <small>{source.authors || source.organization}</small>
+                    </span>
+                    <ArrowRight size={13} />
+                  </button>
+                ))}
+                {!taggedSources.length && <p>No directly tagged sources.</p>}
+              </div>
+              <div className="tag-detail-section">
+                <h4>Excerpts</h4>
+                {taggedExcerpts.map((excerpt) => {
+                  const source = sources.find(
+                    (item) => item.id === excerpt.sourceId,
+                  );
+                  return (
+                    <button
+                      className="tag-related-item excerpt"
+                      key={excerpt.id}
+                      disabled={!source}
+                      onClick={() => source && onSource(source)}
+                    >
+                      <Highlighter size={15} />
+                      <span>
+                        <strong>{excerpt.selectedText}</strong>
+                        <small>{source?.title}</small>
+                      </span>
+                      <ArrowRight size={13} />
+                    </button>
+                  );
+                })}
+                {!taggedExcerpts.length && <p>No tagged excerpts.</p>}
+              </div>
+            </>
+          ) : (
+            <div className="tag-detail-empty">
+              <Tag size={25} />
+              <h3>Select a tag</h3>
+              <p>See every related source and excerpt in one place.</p>
+            </div>
+          )}
+        </section>
       </div>
     </>
   );
@@ -972,98 +2273,458 @@ function SettingsView({
   );
 }
 
+function ProjectDeleteModal({
+  project,
+  onClose,
+  onConfirm,
+}: {
+  project: Project;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !deleting) onClose();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [deleting, onClose]);
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !deleting) onClose();
+      }}
+    >
+      <div
+        className="modal project-delete-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-project-title"
+      >
+        <div className="delete-modal-icon">
+          <Trash2 size={20} />
+        </div>
+        <h3 id="delete-project-title">Delete project permanently?</h3>
+        <p>
+          <strong>{project.name}</strong> will be permanently deleted. Its
+          sources and excerpts will remain in your library, but this project and
+          its organization cannot be recovered.
+        </p>
+        <div className="modal-footer">
+          <button className="btn" onClick={onClose} disabled={deleting}>
+            Cancel
+          </button>
+          <button
+            className="btn danger-solid"
+            disabled={deleting}
+            onClick={async () => {
+              setDeleting(true);
+              await onConfirm();
+              setDeleting(false);
+            }}
+          >
+            <Trash2 size={14} />
+            {deleting ? "Deleting…" : "Delete permanently"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectDetail({
+  project,
+  sources,
+  annotations,
+  onBack,
+  onSource,
+  onAddSource,
+  onState,
+  onRequestDelete,
+}: {
+  project: Project;
+  sources: Source[];
+  annotations: Annotation[];
+  onBack: () => void;
+  onSource: (source: Source) => void;
+  onAddSource: () => void;
+  onState: (
+    project: Project,
+    action: "unarchive" | "archive",
+  ) => void | Promise<void>;
+  onRequestDelete: (project: Project) => void;
+}) {
+  const annotationCount = annotations.filter((annotation) =>
+    annotation.projects.includes(project.id),
+  ).length;
+  return (
+    <>
+      <button className="back-button" onClick={onBack}>
+        <ArrowLeft size={15} /> All projects
+      </button>
+      <div className="page-title project-detail-title">
+        <div>
+          <div className="kicker">Project</div>
+          <h2>{project.name}</h2>
+          <p>{project.description || "Your collected research sources."}</p>
+          <div className="project-detail-counts">
+            <span>{sources.length} sources</span>
+            <span>{annotationCount} excerpts</span>
+          </div>
+        </div>
+        <div className="project-detail-actions">
+          <button className="btn primary" onClick={onAddSource}>
+            <BookmarkPlus size={16} /> Save a source
+          </button>
+          <ProjectMenu
+            project={project}
+            onState={onState}
+            onRequestDelete={onRequestDelete}
+          />
+        </div>
+      </div>
+      <section className="project-source-list">
+        <div className="section-list-heading">
+          <div>
+            <h3>Sources</h3>
+            <p>Everything saved to this project.</p>
+          </div>
+        </div>
+        {sources.length ? (
+          sources.map((source) => {
+            const sourceAnnotations = annotations.filter(
+              (annotation) => annotation.sourceId === source.id,
+            ).length;
+            return (
+              <button
+                className="card project-source-card"
+                key={source.id}
+                onClick={() => onSource(source)}
+              >
+                <span className="source-type-icon">
+                  <FileText size={18} />
+                </span>
+                <span className="project-source-copy">
+                  <span className="source-kind">{source.type}</span>
+                  <strong>{source.title}</strong>
+                  <small>
+                    {[source.authors, source.organization, source.date]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </small>
+                  <span className="project-source-tags">
+                    {source.tags.slice(0, 4).map((tag) => (
+                      <span className="pill" key={tag}>
+                        #{tag}
+                      </span>
+                    ))}
+                  </span>
+                </span>
+                <span className="project-source-annotation-count">
+                  {sourceAnnotations} excerpts
+                </span>
+                <ArrowRight size={16} />
+              </button>
+            );
+          })
+        ) : (
+          <div className="card empty">
+            <Library size={24} />
+            <h3>No sources in this project yet</h3>
+            <p>Save a source and assign it to {project.name}.</p>
+            <button className="btn primary" onClick={onAddSource}>
+              <BookmarkPlus size={15} /> Save a source
+            </button>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
 function SourceDetail({
   source,
   annotations,
-  onClose,
-  onCopy,
+  onEdit,
+  onSaveBibliography,
+  onToggleBibliography,
+  onCopyAnnotation,
+  onEditAnnotation,
+  onDeleteAnnotation,
+  onAddAnnotation,
+  onBack,
 }: {
   source: Source;
   annotations: Annotation[];
-  onClose: () => void;
-  onCopy: () => void;
+  onEdit: () => void;
+  onSaveBibliography: (
+    bibliographyAnnotation: string,
+    includeInBibliography: boolean,
+  ) => void | Promise<void>;
+  onToggleBibliography: (include: boolean) => void | Promise<void>;
+  onCopyAnnotation: (annotation: Annotation) => void;
+  onEditAnnotation: (annotation: Annotation) => void;
+  onDeleteAnnotation: (annotation: Annotation) => void;
+  onAddAnnotation: () => void;
+  onBack: () => void;
 }) {
   const [style, setStyle] = useState("APA");
   const [copied, setCopied] = useState(false);
+  const [bibliographyEditing, setBibliographyEditing] = useState(false);
+  const [bibliographySaving, setBibliographySaving] = useState(false);
+  const [bibliographyDraft, setBibliographyDraft] = useState(
+    source.bibliographyAnnotation || "",
+  );
+  const bibliographyTextareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    setBibliographyDraft(source.bibliographyAnnotation || "");
+  }, [source.bibliographyAnnotation]);
+  useEffect(() => {
+    const textarea = bibliographyTextareaRef.current;
+    if (!textarea || !bibliographyEditing) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+    textarea.focus();
+  }, [bibliographyDraft, bibliographyEditing]);
   const text = citation(source, style);
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <div className="card-header">
-          <div>
-            <div className="kicker">{source.type}</div>
-            <h3 style={{ marginTop: 6 }}>{source.title}</h3>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={16} />
+    <div className="source-detail-page">
+      <button className="back-button" onClick={onBack}>
+        <ArrowLeft size={15} /> Back
+      </button>
+      <div className="page-title source-detail-title">
+        <div>
+          <div className="kicker">{source.type}</div>
+          <h2>{source.title}</h2>
+          <p>
+            {[source.authors, source.organization, source.date]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        </div>
+        <div className="source-detail-actions">
+          <a className="btn" href={source.url} target="_blank" rel="noreferrer">
+            Open original <ExternalLink size={14} />
+          </a>
+          <button
+            className="icon-btn source-edit-button"
+            title="Edit citation information"
+            aria-label="Edit citation information"
+            onClick={onEdit}
+          >
+            <Pencil size={15} />
           </button>
         </div>
-        <div className="detail-grid">
-          <div>
-            <div className="source-meta">
-              {source.authors} · {source.organization} · {source.date}
-            </div>
-            <p style={{ lineHeight: 1.6, fontSize: 14 }}>
-              {source.description}
-            </p>
-            <div>
-              {source.tags.map((t) => (
-                <span className="pill" key={t}>
-                  #{t}
-                </span>
-              ))}
-            </div>
-            <div style={{ marginTop: 25 }}>
-              <div className="card-header">
-                <h3>Annotations ({annotations.length})</h3>
-              </div>
-              {annotations.length ? (
-                annotations.map((a) => (
-                  <div className="annotation" key={a.id}>
-                    <div className="quote">{a.selectedText}</div>
-                    <div className="note">{a.note}</div>
-                  </div>
-                ))
-              ) : (
-                <div className="empty">No annotations yet.</div>
-              )}
-            </div>
+      </div>
+      <section className="card citation-header-card">
+        <div className="citation-toolbar">
+          <div className="citation-title">
+            <BookOpen size={15} />
+            <h3>Citation</h3>
           </div>
-          <aside>
-            <div className="field">
-              <label>CITATION STYLE</label>
+          <div className="citation-actions">
+            <label className="citation-style-control">
+              <span>Style</span>
               <select value={style} onChange={(e) => setStyle(e.target.value)}>
                 <option>APA</option>
                 <option>MLA</option>
                 <option>Chicago</option>
               </select>
-            </div>
-            <div style={{ marginTop: 10 }} className="citation">
-              {text}
-            </div>
+            </label>
             <button
-              className="btn primary"
-              style={{ width: "100%", justifyContent: "center", marginTop: 9 }}
+              className="btn citation-copy-button"
               onClick={() => {
                 navigator.clipboard?.writeText(text);
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1200);
               }}
             >
-              {copied ? "Copied" : "Copy citation"}
+              <Copy size={14} /> {copied ? "Copied" : "Copy"}
             </button>
-            <a
-              className="btn"
-              style={{ width: "100%", justifyContent: "center", marginTop: 8 }}
-              href={source.url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open original <ExternalLink size={14} />
-            </a>
-          </aside>
+          </div>
         </div>
-      </div>
+        <div className="citation citation-full">{text}</div>
+      </section>
+      <section className="card bibliography-annotation-card">
+        <div className="bibliography-annotation-toolbar">
+          <div className="bibliography-annotation-heading">
+            <BookOpen size={14} />
+            <div>
+              <h3>Bibliography annotation</h3>
+              <p>Summary and evaluation for your annotated bibliography.</p>
+            </div>
+          </div>
+          <label className="bibliography-toggle">
+            <span>Include in bibliography</span>
+            <input
+              type="checkbox"
+              checked={source.includeInBibliography !== false}
+              onChange={(event) => onToggleBibliography(event.target.checked)}
+            />
+            <i />
+          </label>
+        </div>
+        {bibliographyEditing ? (
+          <form
+            className="bibliography-inline-editor"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setBibliographySaving(true);
+              try {
+                await onSaveBibliography(
+                  bibliographyDraft.trim(),
+                  source.includeInBibliography !== false,
+                );
+                setBibliographyEditing(false);
+              } catch {
+                return;
+              } finally {
+                setBibliographySaving(false);
+              }
+            }}
+          >
+            <textarea
+              ref={bibliographyTextareaRef}
+              value={bibliographyDraft}
+              onChange={(event) => setBibliographyDraft(event.target.value)}
+              aria-label="Bibliography annotation"
+            />
+            <div>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setBibliographyDraft(source.bibliographyAnnotation || "");
+                  setBibliographyEditing(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button className="btn primary" disabled={bibliographySaving}>
+                {bibliographySaving ? "Saving…" : "Save annotation"}
+              </button>
+            </div>
+          </form>
+        ) : source.bibliographyAnnotation ? (
+          <div className="bibliography-annotation-content">
+            <p>{source.bibliographyAnnotation}</p>
+            <button
+              className="icon-btn"
+              onClick={() => setBibliographyEditing(true)}
+            >
+              <Pencil size={14} />
+            </button>
+          </div>
+        ) : (
+          <button
+            className="text-button bibliography-add-button"
+            onClick={() => setBibliographyEditing(true)}
+          >
+            <Plus size={13} /> Add an annotation
+          </button>
+        )}
+      </section>
+      <section className="card source-annotations-card">
+        <div className="section-list-heading">
+          <div>
+            <h3>Excerpts</h3>
+            <p>{annotations.length} captured from this source.</p>
+          </div>
+          <button className="btn primary" onClick={onAddAnnotation}>
+            <Plus size={15} /> New excerpt
+          </button>
+        </div>
+        {annotations.length ? (
+          annotations.map((annotation) => (
+            <article
+              className="annotation source-detail-annotation"
+              key={annotation.id}
+            >
+              <div className="annotation-top">
+                <div className="annotation-context">
+                  <span className="annotation-type">
+                    <Highlighter size={12} /> {annotation.type}
+                  </span>
+                  <span className="source-meta">
+                    {annotation.pageNumber
+                      ? `Page ${annotation.pageNumber} · `
+                      : ""}
+                    {annotation.createdAt}
+                  </span>
+                </div>
+                <AnnotationActions
+                  annotation={annotation}
+                  onCopy={onCopyAnnotation}
+                  onEdit={onEditAnnotation}
+                  onDelete={onDeleteAnnotation}
+                />
+              </div>
+              <div className="quote">{annotation.selectedText}</div>
+              {annotation.note && <div className="note">{annotation.note}</div>}
+              <div className="annotation-tags">
+                {annotation.tags.map((tag) => (
+                  <span className="pill" key={tag}>
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            </article>
+          ))
+        ) : (
+          <div className="empty">
+            <Highlighter size={24} />
+            <h3>No excerpts yet</h3>
+            <p>Highlight text with the extension to add it here.</p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function AnnotationActions({
+  annotation,
+  onCopy,
+  onEdit,
+  onDelete,
+}: {
+  annotation: Annotation;
+  onCopy: (annotation: Annotation) => void;
+  onEdit: (annotation: Annotation) => void;
+  onDelete: (annotation: Annotation) => void;
+}) {
+  return (
+    <div className="annotation-actions">
+      <button
+        type="button"
+        className="icon-btn"
+        title="Copy quote"
+        aria-label="Copy quote"
+        onClick={() => onCopy(annotation)}
+      >
+        <Copy size={14} />
+      </button>
+      <button
+        type="button"
+        className="icon-btn"
+        title="Edit excerpt"
+        aria-label="Edit excerpt"
+        onClick={() => onEdit(annotation)}
+      >
+        <Pencil size={14} />
+      </button>
+      <button
+        type="button"
+        className="icon-btn danger"
+        title="Delete excerpt"
+        aria-label="Delete excerpt"
+        onClick={() => onDelete(annotation)}
+      >
+        <Trash2 size={14} />
+      </button>
     </div>
   );
 }
@@ -1151,35 +2812,79 @@ function TagInput({
 
 function SourceModal({
   projects,
+  initialProjectId,
+  initialSource,
   onCreateProject,
   onClose,
   onSave,
 }: {
   projects: Project[];
+  initialProjectId?: string;
+  initialSource?: Source;
   onCreateProject: (name: string) => Promise<Project>;
   onClose: () => void;
   onSave: (s: Source) => void | Promise<void>;
 }) {
+  const [step, setStep] = useState<"link" | "details">(
+    initialSource ? "details" : "link",
+  );
+  const [analysisUrl, setAnalysisUrl] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
   const [f, setF] = useState({
-    title: "",
-    authors: "",
-    organization: "",
-    date: "",
-    url: "",
-    type: "Article" as SourceType,
-    description: "",
+    title: initialSource?.title || "",
+    authors: initialSource?.authors || "",
+    organization: initialSource?.organization || "",
+    date: initialSource?.date || "",
+    url: initialSource?.url || "",
+    type: initialSource?.type || ("Article" as SourceType),
+    description: initialSource?.description || "",
+    bibliographyAnnotation: initialSource?.bibliographyAnnotation || "",
     tags: "",
-    project: projects[0]?.id || "",
-    notes: "",
+    project:
+      initialProjectId || initialSource?.projects[0] || projects[0]?.id || "",
+    notes: initialSource?.notes || "",
   });
-  const [tags, setTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>(initialSource?.tags || []);
   const [newProject, setNewProject] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
+  async function analyzeLink(event: React.FormEvent) {
+    event.preventDefault();
+    setAnalyzing(true);
+    setAnalysisError("");
+    try {
+      const response = await fetch("/api/sources/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: analysisUrl }),
+      });
+      const data = await readJsonResponse(response);
+      if (!response.ok)
+        throw new Error(data.error ?? "Could not analyze this link");
+      setF((current) => ({
+        ...current,
+        title: data.title || "",
+        authors: Array.isArray(data.authors) ? data.authors.join("\n") : "",
+        organization: data.organization || "",
+        date: data.date || "",
+        url: data.url || analysisUrl,
+        type: sourceTypes.includes(data.type) ? data.type : "Website",
+        description: data.description || "",
+      }));
+      setStep("details");
+    } catch (error) {
+      setAnalysisError(
+        error instanceof Error ? error.message : "Could not analyze this link",
+      );
+    } finally {
+      setAnalyzing(false);
+    }
+  }
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!f.title || !f.url) return;
     onSave({
-      id: uid("s"),
+      id: initialSource?.id || uid("s"),
       title: f.title,
       authors: f.authors
         .split("\n")
@@ -1191,17 +2896,68 @@ function SourceModal({
       url: f.url,
       type: f.type,
       description: f.description,
+      bibliographyAnnotation: f.bibliographyAnnotation,
       tags,
       projects: f.project ? [f.project] : [],
       notes: f.notes,
-      createdAt: new Date().toISOString().slice(0, 10),
+      createdAt:
+        initialSource?.createdAt || new Date().toISOString().slice(0, 10),
     });
   }
+  if (step === "link")
+    return (
+      <div className="modal-backdrop">
+        <form className="modal source-link-modal" onSubmit={analyzeLink}>
+          <div className="card-header">
+            <h3>Save a source</h3>
+            <button type="button" className="icon-btn" onClick={onClose}>
+              <X size={16} />
+            </button>
+          </div>
+          <div className="source-link-intro">
+            <span className="source-link-icon">
+              <Link2 size={20} />
+            </span>
+            <h4>Cite from a link</h4>
+            <p>
+              Paste a webpage link and Marginalia will extract its citation
+              information for you to review.
+            </p>
+          </div>
+          <div className="field">
+            <label>SOURCE LINK</label>
+            <input
+              required
+              type="url"
+              autoFocus
+              value={analysisUrl}
+              onChange={(event) => setAnalysisUrl(event.target.value)}
+            />
+          </div>
+          {analysisError && (
+            <div className="analysis-error">{analysisError}</div>
+          )}
+          <button
+            className="btn primary analyze-source-button"
+            disabled={analyzing || !analysisUrl.trim()}
+          >
+            {analyzing ? "Analyzing source…" : "Analyze and continue"}
+          </button>
+          <button
+            type="button"
+            className="manual-citation-button"
+            onClick={() => setStep("details")}
+          >
+            Cite manually
+          </button>
+        </form>
+      </div>
+    );
   return (
     <div className="modal-backdrop">
       <form className="modal" onSubmit={submit}>
         <div className="card-header">
-          <h3>Add source</h3>
+          <h3>{initialSource ? "Edit source" : "New source"}</h3>
           <button type="button" className="icon-btn" onClick={onClose}>
             <X size={16} />
           </button>
@@ -1334,23 +3090,34 @@ function SourceModal({
 function AnnotationModal({
   sources,
   projects,
+  initialSourceId,
+  initialProjectId,
+  initialAnnotation,
   onClose,
   onSave,
 }: {
   sources: Source[];
   projects: Project[];
+  initialSourceId?: string;
+  initialProjectId?: string;
+  initialAnnotation?: Annotation;
   onClose: () => void;
   onSave: (a: Annotation) => void | Promise<void>;
 }) {
   const [f, setF] = useState({
-    sourceId: sources[0]?.id || "",
-    selectedText: "",
-    note: "",
-    pageNumber: "",
-    project: projects[0]?.id || "",
-    type: "Quote" as Annotation["type"],
+    sourceId:
+      initialAnnotation?.sourceId || initialSourceId || sources[0]?.id || "",
+    selectedText: initialAnnotation?.selectedText || "",
+    note: initialAnnotation?.note || "",
+    pageNumber: initialAnnotation?.pageNumber || "",
+    project:
+      initialAnnotation?.projects[0] ||
+      initialProjectId ||
+      projects[0]?.id ||
+      "",
+    type: initialAnnotation?.type || ("Note" as Annotation["type"]),
   });
-  const [tags, setTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>(initialAnnotation?.tags || []);
   return (
     <div className="modal-backdrop">
       <form
@@ -1358,7 +3125,7 @@ function AnnotationModal({
         onSubmit={(e) => {
           e.preventDefault();
           onSave({
-            id: uid("a"),
+            id: initialAnnotation?.id || uid("a"),
             sourceId: f.sourceId,
             selectedText: f.selectedText,
             note: f.note,
@@ -1366,12 +3133,14 @@ function AnnotationModal({
             projects: f.project ? [f.project] : [],
             type: f.type,
             pageNumber: f.pageNumber || undefined,
-            createdAt: new Date().toISOString().slice(0, 10),
+            createdAt:
+              initialAnnotation?.createdAt ||
+              new Date().toISOString().slice(0, 10),
           });
         }}
       >
         <div className="card-header">
-          <h3>New annotation</h3>
+          <h3>{initialAnnotation ? "Edit excerpt" : "New excerpt"}</h3>
           <button type="button" className="icon-btn" onClick={onClose}>
             <X size={16} />
           </button>
@@ -1381,7 +3150,15 @@ function AnnotationModal({
             <label>SOURCE</label>
             <select
               value={f.sourceId}
-              onChange={(e) => setF({ ...f, sourceId: e.target.value })}
+              onChange={(e) => {
+                const sourceId = e.target.value;
+                const source = sources.find((item) => item.id === sourceId);
+                setF({
+                  ...f,
+                  sourceId,
+                  project: source?.projects[0] || f.project,
+                });
+              }}
             >
               {sources.map((s) => (
                 <option value={s.id} key={s.id}>
@@ -1415,7 +3192,6 @@ function AnnotationModal({
                 }
               >
                 {[
-                  "Quote",
                   "Evidence",
                   "Summary",
                   "Question",
@@ -1456,7 +3232,9 @@ function AnnotationModal({
           <button type="button" className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary">Save annotation</button>
+          <button className="btn primary">
+            {initialAnnotation ? "Update excerpt" : "Save excerpt"}
+          </button>
         </div>
       </form>
     </div>
@@ -1478,7 +3256,14 @@ function ProjectModal({
         className="modal"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name) onSave({ id: uid("p"), name, description });
+          if (name)
+            onSave({
+              id: uid("p"),
+              name,
+              description,
+              isActive: true,
+              deletedAt: null,
+            });
         }}
       >
         <div className="card-header">

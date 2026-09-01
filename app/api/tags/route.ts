@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
       tags.map((tag) => ({
         id: tag.id,
         name: tag.name,
-        count: tag._count.sources + tag._count.annotations,
+        count: tag._count.sources + tag._count.excerpts,
       })),
     );
   } catch (error) {

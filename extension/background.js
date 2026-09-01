@@ -6,6 +6,7 @@ import {
 } from "./api-service.js";
 
 const SOURCES_KEY = "marginaliaSavedSources";
+const THEME_KEY = "marginaliaTheme";
 const TAG_CACHE_TTL = 30_000;
 let tagCache = { tags: [], expiresAt: 0 };
 
@@ -52,6 +53,24 @@ chrome.runtime.onStartup.addListener(protectSessionStorage);
 protectSessionStorage();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "set-popup-theme") {
+    if (message.theme === "dark" || message.theme === "light") {
+      chrome.storage.local
+        .set({ [THEME_KEY]: message.theme })
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ error: error.message }));
+      return true;
+    }
+    sendResponse({ error: "Invalid theme" });
+    return;
+  }
+  if (message.type === "get-popup-theme") {
+    chrome.storage.local
+      .get(THEME_KEY)
+      .then((data) => sendResponse({ theme: data[THEME_KEY] || null }))
+      .catch((error) => sendResponse({ error: error.message }));
+    return true;
+  }
   if (message.type === "annotation-context") {
     (async () => {
       const key = normalizeUrl(message.url),

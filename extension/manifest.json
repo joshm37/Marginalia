@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Marginalia",
-  "version": "0.4.1",
+  "version": "0.4.7",
   "description": "Capture sources and selected passages into your research library.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["http://localhost:3000/*"],
