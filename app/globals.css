@@ -1638,7 +1638,7 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 28px;
+  margin-bottom: 16px;
 }
 .project-quick-actions {
   display: flex;
@@ -1690,8 +1690,9 @@ a {
 }
 .project-total {
   align-self: center;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
 }
 .project-filter {
   position: relative;

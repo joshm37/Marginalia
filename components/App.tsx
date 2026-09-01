@@ -1730,10 +1730,7 @@ function ProjectsView({
         <div>
           <div className="kicker">Workspaces</div>
           <h2>Projects</h2>
-          <p>
-            Research collections that connect sources, excerpts, and future
-            writing.
-          </p>
+          <p>Organize sources and excerpts into focused research spaces.</p>
         </div>
         <button className="btn primary" onClick={onAdd}>
           <Plus size={16} /> New project
@@ -1743,7 +1740,9 @@ function ProjectsView({
         <div className="project-total">
           {projectQuery
             ? `${visibleProjects.length} of ${availableProjects.length} projects`
-            : `${active.length + archived.length} total projects`}
+            : showArchived
+              ? `${availableProjects.length} projects shown`
+              : `${active.length} active ${active.length === 1 ? "project" : "projects"}`}
         </div>
         <div className="project-quick-actions">
           <div className="project-search">
@@ -1770,12 +1769,8 @@ function ProjectsView({
         </div>
       </div>
       <ProjectSection
-        title="Projects"
-        description={
-          showArchived
-            ? "Active and archived research workspaces."
-            : "Active research workspaces shown on your dashboard."
-        }
+        title=""
+        description=""
         projects={visibleProjects}
         sources={sources}
         annotations={annotations}
@@ -1820,12 +1815,14 @@ function ProjectSection({
 }) {
   return (
     <section className="project-section">
-      <div className="section-list-heading">
-        <div>
-          <h3>{title}</h3>
-          <p>{description}</p>
+      {(title || description) && (
+        <div className="section-list-heading">
+          <div>
+            {title && <h3>{title}</h3>}
+            {description && <p>{description}</p>}
+          </div>
         </div>
-      </div>
+      )}
       {projects.length ? (
         <div className="project-library-grid">
           {projects.map((project) => (
