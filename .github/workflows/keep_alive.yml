@@ -2,16 +2,18 @@ name: Keep Supabase Alive
 
 on:
   schedule:
-    # Run at midnight (0 0 * *) on Sunday (0) and Friday(5)
-    - cron: '0 0 * * 0,5'
+    - cron: "0 12 * * 1,5"
   workflow_dispatch:
 
 jobs:
-  ping:
+  keep-alive:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Ping Supabase Database
+      - name: Ping Supabase database
         run: |
-          curl -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/heartbeat?select=id&limit=1" \
-          -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
-          -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}"
+          curl --fail --show-error --silent \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/heartbeat?select=id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}"
+
+          echo "Supabase heartbeat successful"
