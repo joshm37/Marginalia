@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import {
   Archive,
@@ -56,6 +56,40 @@ function citation(source: Source, style: string) {
   return `${author}. (${source.date || "n.d."}). ${source.title}. ${source.organization ? source.organization + ". " : ""}${source.url}`;
 }
 
+const THEME_EVENT = "marginalia-theme-change";
+
+function subscribeToTheme(onChange: () => void) {
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const notifySystemThemeChange = () => {
+    if (!localStorage.getItem("rcm-theme")) onChange();
+  };
+  window.addEventListener(THEME_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  media.addEventListener("change", notifySystemThemeChange);
+  return () => {
+    window.removeEventListener(THEME_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+    media.removeEventListener("change", notifySystemThemeChange);
+  };
+}
+
+function getThemeSnapshot() {
+  const saved = localStorage.getItem("rcm-theme");
+  return saved
+    ? saved === "dark"
+    : window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function useDarkMode() {
+  return useSyncExternalStore(subscribeToTheme, getThemeSnapshot, () => false);
+}
+
+function setTheme(dark: boolean) {
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  localStorage.setItem("rcm-theme", dark ? "dark" : "light");
+  window.dispatchEvent(new Event(THEME_EVENT));
+}
+
 export default function App() {
   const [sources, setSources] = useState<Source[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -65,7 +99,7 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [accountMenu, setAccountMenu] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const darkMode = useDarkMode();
   const accountRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -126,13 +160,8 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
-    const preferred =
-      localStorage.getItem("rcm-theme") === "dark" ||
-      (!localStorage.getItem("rcm-theme") &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches);
-    setDarkMode(preferred);
-    document.documentElement.dataset.theme = preferred ? "dark" : "light";
-  }, []);
+    document.documentElement.dataset.theme = darkMode ? "dark" : "light";
+  }, [darkMode]);
   useEffect(() => {
     if (!accountMenu) return;
     function closeOnOutsideClick(event: PointerEvent) {
@@ -496,14 +525,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       const next = !darkMode;
-                      setDarkMode(next);
-                      document.documentElement.dataset.theme = next
-                        ? "dark"
-                        : "light";
-                      localStorage.setItem(
-                        "rcm-theme",
-                        next ? "dark" : "light",
-                      );
+                      setTheme(next);
                     }}
                   >
                     <span>
@@ -608,6 +630,7 @@ export default function App() {
           )}
           {view === "Source" && selectedSource && (
             <SourceDetail
+              key={selectedSource.id}
               source={selectedSource}
               annotations={annotations.filter(
                 (annotation) => annotation.sourceId === selectedSource.id,
@@ -668,6 +691,7 @@ export default function App() {
           )}
           {view === "Tags" && (
             <TagsView
+              key={searchedTag ?? "all-tags"}
               sources={sources}
               annotations={annotations}
               initialTag={searchedTag}
@@ -692,11 +716,7 @@ export default function App() {
               darkMode={darkMode}
               onTheme={() => {
                 const next = !darkMode;
-                setDarkMode(next);
-                document.documentElement.dataset.theme = next
-                  ? "dark"
-                  : "light";
-                localStorage.setItem("rcm-theme", next ? "dark" : "light");
+                setTheme(next);
               }}
             />
           )}
@@ -1198,7 +1218,10 @@ function SourcesView({
       sources.some((source) => source.projects.includes(project.id)),
     )
     .sort((a, b) => a.name.localeCompare(b.name));
-  const projectMap = new Map(projects.map((project) => [project.id, project]));
+  const projectMap = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
+    [projects],
+  );
   const visibleSources = useMemo(() => {
     const value = sourceQuery.trim().toLowerCase();
     return sources
@@ -1447,8 +1470,14 @@ function AnnotationsView({
   const [tagFilter, setTagFilter] = useState("All");
   const [typeFilter, setTypeFilter] = useState("All");
   const [sortBy, setSortBy] = useState("newest");
-  const sourceMap = new Map(sources.map((source) => [source.id, source]));
-  const projectMap = new Map(projects.map((project) => [project.id, project]));
+  const sourceMap = useMemo(
+    () => new Map(sources.map((source) => [source.id, source])),
+    [sources],
+  );
+  const projectMap = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
+    [projects],
+  );
   const excerptSources = sources
     .filter((source) => annotations.some((item) => item.sourceId === source.id))
     .sort((a, b) => a.title.localeCompare(b.title));
@@ -2069,9 +2098,6 @@ function TagsView({
 }) {
   const [tagQuery, setTagQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState<string | null>(initialTag);
-  useEffect(() => {
-    if (initialTag) setSelectedTag(initialTag);
-  }, [initialTag]);
   const tags = new Map<string, { sources: number; excerpts: number }>();
   sources
     .flatMap((s) => s.tags)
@@ -2476,9 +2502,6 @@ function SourceDetail({
     source.bibliographyAnnotation || "",
   );
   const bibliographyTextareaRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    setBibliographyDraft(source.bibliographyAnnotation || "");
-  }, [source.bibliographyAnnotation]);
   useEffect(() => {
     const textarea = bibliographyTextareaRef.current;
     if (!textarea || !bibliographyEditing) return;

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:rename-excerpts": "prisma db execute --file prisma/rename-annotations-to-excerpts.sql",
@@ -23,16 +24,18 @@
     "@supabase/supabase-js": "^2.112.4",
     "dotenv": "^17.4.2",
     "lucide-react": "0.468.0",
-    "next": "15.5.2",
+    "next": "^16.3.4",
     "pg": "^8.23.0",
-    "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/pg": "^8.23.1",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.4",
     "prettier": "^3.9.6",
     "prisma": "^7.10.0",
     "typescript": "^5.7.2"

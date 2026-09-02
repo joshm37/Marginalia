@@ -5,4 +5,5 @@ node_modules/
 .env.local
 lib/generated/prisma/
 *.log
+*.tsbuildinfo
 .DS_Store
