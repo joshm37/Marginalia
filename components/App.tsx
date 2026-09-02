@@ -43,6 +43,71 @@ const sourceTypes: SourceType[] = [
   "Website",
 ];
 
+const walkthroughSteps = [
+  {
+    view: "Dashboard",
+    eyebrow: "Your home base",
+    title: "See your research at a glance",
+    description: "The dashboard keeps active projects, recent sources, and your newest excerpts close at hand.",
+  },
+  {
+    view: "Projects",
+    eyebrow: "Projects",
+    title: "Organize work by question or assignment",
+    description: "Create a project, open it to see every connected source, or archive it when the work is complete.",
+  },
+  {
+    view: "Sources",
+    eyebrow: "Sources",
+    title: "Build a reliable source library",
+    description: "Save a URL for automatic citation details, enter one manually, then filter and sort your library as it grows.",
+  },
+  {
+    view: "Annotations",
+    eyebrow: "Excerpts",
+    title: "Keep evidence connected to context",
+    description: "Every highlighted passage lives with its source, project, note, page number, and reusable tags.",
+  },
+  {
+    view: "Tags",
+    eyebrow: "Tags",
+    title: "Follow ideas across your research",
+    description: "Select a tag to reveal all related sources and excerpts, even when they belong to different projects.",
+  },
+  {
+    view: "Archived",
+    eyebrow: "Archive",
+    title: "Clear the workspace without losing work",
+    description: "Archived projects stay preserved here and can be restored whenever you need them again.",
+  },
+  {
+    view: "Dashboard",
+    eyebrow: "Universal search",
+    title: "Find anything from one place",
+    description: "Use the search bar—or press ⌘ K—to find projects, sources, and tags without changing sections first.",
+  },
+  {
+    view: "Dashboard",
+    eyebrow: "Chrome extension · Save",
+    title: "Capture a source while you browse",
+    description: "Open the Marginalia extension on an article, review the detected citation details, choose a project, add tags, and save.",
+    extension: "source",
+  },
+  {
+    view: "Dashboard",
+    eyebrow: "Chrome extension · Excerpt",
+    title: "Turn a highlight into usable evidence",
+    description: "After saving a source, highlight text on the page. Add a note, tags, and an optional page number in the popup, then save the excerpt.",
+    extension: "excerpt",
+  },
+  {
+    view: "Settings",
+    eyebrow: "You’re ready",
+    title: "Make Marginalia your own",
+    description: "Adjust appearance here and restart this walkthrough at any time. Your workspace is ready for the next research question.",
+  },
+] as const;
+
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -124,6 +189,7 @@ export default function App() {
   const [sourceBackView, setSourceBackView] = useState("Sources");
   const [toast, setToast] = useState("");
   const [sourceType, setSourceType] = useState<SourceType | "All">("All");
+  const [walkthroughStep, setWalkthroughStep] = useState<number | null>(null);
 
   useEffect(() => {
     async function loadWorkspace(initial = false) {
@@ -260,6 +326,15 @@ export default function App() {
     if (nextView !== "Project") setSelectedProject(null);
     setView(nextView);
   }
+  function goToWalkthroughStep(index: number) {
+    const step = walkthroughSteps[index];
+    if (!step) {
+      setWalkthroughStep(null);
+      return;
+    }
+    navigate(step.view);
+    setWalkthroughStep(index);
+  }
   function openProject(project: Project) {
     setProjectBackView(view);
     setSelectedProject(project);
@@ -383,7 +458,6 @@ export default function App() {
           </div>
           <div>
             <h1>Marginalia</h1>
-            <p>Research workspace</p>
           </div>
         </div>
         <nav className="nav">
@@ -458,9 +532,6 @@ export default function App() {
           <button onClick={() => notify("Extension setup is coming next")}>
             Extension setup <ArrowRight size={13} />
           </button>
-        </div>
-        <div className="sidebar-footer">
-          <span className="status-dot" /> Demo workspace
         </div>
       </aside>
 
@@ -718,6 +789,7 @@ export default function App() {
                 const next = !darkMode;
                 setTheme(next);
               }}
+              onStartWalkthrough={() => goToWalkthroughStep(0)}
             />
           )}
         </div>
@@ -901,6 +973,14 @@ export default function App() {
               );
             }
           }}
+        />
+      )}
+      {walkthroughStep !== null && (
+        <Walkthrough
+          step={walkthroughStep}
+          onBack={() => goToWalkthroughStep(walkthroughStep - 1)}
+          onNext={() => goToWalkthroughStep(walkthroughStep + 1)}
+          onClose={() => setWalkthroughStep(null)}
         />
       )}
       {toast && <div className="toast">{toast}</div>}
@@ -2241,10 +2321,12 @@ function SettingsView({
   user,
   darkMode,
   onTheme,
+  onStartWalkthrough,
 }: {
   user: { name: string; email: string };
   darkMode: boolean;
   onTheme: () => void;
+  onStartWalkthrough: () => void;
 }) {
   return (
     <>
@@ -2291,8 +2373,133 @@ function SettingsView({
             </span>
           </button>
         </section>
+        <section className="card settings-card settings-tour-card">
+          <div>
+            <h3>Getting started</h3>
+            <p>Take a guided tour of the workspace and browser extension.</p>
+          </div>
+          <button className="setting-row" onClick={onStartWalkthrough}>
+            <span className="setting-icon">
+              <BookOpen size={17} />
+            </span>
+            <span>
+              <strong>App walkthrough</strong>
+              <small>About 2 minutes · 10 steps</small>
+            </span>
+            <ArrowRight size={15} />
+          </button>
+        </section>
       </div>
     </>
+  );
+}
+
+function Walkthrough({
+  step,
+  onBack,
+  onNext,
+  onClose,
+}: {
+  step: number;
+  onBack: () => void;
+  onNext: () => void;
+  onClose: () => void;
+}) {
+  const current = walkthroughSteps[step];
+  const isLast = step === walkthroughSteps.length - 1;
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowLeft" && step > 0) onBack();
+      if (event.key === "ArrowRight" || event.key === "Enter") onNext();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onBack, onClose, onNext, step]);
+
+  return (
+    <div className="walkthrough-layer" role="presentation">
+      <button
+        className="walkthrough-dismiss-area"
+        aria-label="Close walkthrough"
+        onClick={onClose}
+      />
+      <section
+        className="walkthrough-card"
+        role="dialog"
+        aria-modal="true"
+        aria-live="polite"
+        aria-labelledby="walkthrough-title"
+      >
+        <div className="walkthrough-progress" aria-hidden="true">
+          {walkthroughSteps.map((_, index) => (
+            <span key={index} className={index <= step ? "complete" : ""} />
+          ))}
+        </div>
+        <div className="walkthrough-heading">
+          <div className="walkthrough-icon">
+            {"extension" in current ? (
+              current.extension === "source" ? <BookmarkPlus size={19} /> : <Highlighter size={19} />
+            ) : step === 1 ? (
+              <FolderOpen size={19} />
+            ) : step === 2 ? (
+              <Library size={19} />
+            ) : step === 4 ? (
+              <Tag size={19} />
+            ) : step === 5 ? (
+              <Archive size={19} />
+            ) : step === 6 ? (
+              <Search size={19} />
+            ) : (
+              <BookOpen size={19} />
+            )}
+          </div>
+          <button ref={closeButtonRef} className="icon-btn" onClick={onClose} aria-label="Close walkthrough">
+            <X size={15} />
+          </button>
+        </div>
+        <div className="walkthrough-copy">
+          <span>{current.eyebrow}</span>
+          <h3 id="walkthrough-title">{current.title}</h3>
+          <p>{current.description}</p>
+        </div>
+        {"extension" in current && (
+          <div className="walkthrough-extension-demo">
+            <div className="walkthrough-browser-bar">
+              <i /><i /><i />
+              <span>Article page</span>
+            </div>
+            {current.extension === "source" ? (
+              <div className="walkthrough-extension-flow">
+                <span><BookmarkPlus size={14} /> Review citation</span>
+                <ArrowRight size={13} />
+                <span><FolderOpen size={14} /> Choose project</span>
+                <ArrowRight size={13} />
+                <span><BookOpen size={14} /> Save source</span>
+              </div>
+            ) : (
+              <div className="walkthrough-highlight-flow">
+                <mark>Select the passage you want to remember.</mark>
+                <div><Highlighter size={14} /> Add note, tags & page</div>
+              </div>
+            )}
+          </div>
+        )}
+        <div className="walkthrough-footer">
+          <span>{step + 1} of {walkthroughSteps.length}</span>
+          <div>
+            {step > 0 && <button className="btn" onClick={onBack}>Back</button>}
+            <button className="btn primary" onClick={onNext}>
+              {isLast ? "Finish" : "Next"}
+              {!isLast && <ArrowRight size={14} />}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
