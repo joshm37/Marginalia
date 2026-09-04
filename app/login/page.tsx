@@ -18,13 +18,22 @@ function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() =>
+    search.get("error") === "confirmation_failed"
+      ? "That confirmation link is invalid or expired. Please try again."
+      : "",
+  );
   const [busy, setBusy] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
+    if (process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true") {
+      router.replace("/");
+      router.refresh();
+      return;
+    }
     const supabase = createClient();
     const result =
       mode === "login"
@@ -41,7 +50,12 @@ function LoginForm() {
     if (result.error) return setError(result.error.message);
     if (mode === "signup" && !result.data.session)
       return setError("Check your email to confirm your account.");
-    router.replace(search.get("next") || "/");
+    const requestedPath = search.get("next");
+    const destination =
+      requestedPath?.startsWith("/") && !requestedPath.startsWith("//")
+        ? requestedPath
+        : "/";
+    router.replace(destination);
     router.refresh();
   }
 
@@ -122,9 +136,15 @@ function LoginForm() {
             : "Already have an account? Sign in"}
         </button>
         <div className="auth-assurances" aria-label="Marginalia features">
-          <span><Bookmark size={13} /> Save sources</span>
-          <span><Highlighter size={13} /> Capture excerpts</span>
-          <span><FolderOpen size={13} /> Build projects</span>
+          <span>
+            <Bookmark size={13} /> Save sources
+          </span>
+          <span>
+            <Highlighter size={13} /> Capture excerpts
+          </span>
+          <span>
+            <FolderOpen size={13} /> Build projects
+          </span>
         </div>
       </section>
       <aside className="auth-visual">
@@ -136,7 +156,9 @@ function LoginForm() {
         </div>
         <div className="auth-research-stack" aria-hidden="true">
           <article className="auth-source-preview auth-source-back">
-            <div className="auth-preview-icon"><FolderOpen size={16} /></div>
+            <div className="auth-preview-icon">
+              <FolderOpen size={16} />
+            </div>
             <div>
               <small>Project</small>
               <strong>Democratic Institutions</strong>
@@ -145,7 +167,9 @@ function LoginForm() {
           </article>
           <article className="auth-source-preview auth-source-front">
             <header>
-              <span><BookOpen size={13} /> Journal article</span>
+              <span>
+                <BookOpen size={13} /> Journal article
+              </span>
               <span className="auth-preview-year">2026</span>
             </header>
             <h2>Notes that stay connected to their source.</h2>
@@ -155,7 +179,9 @@ function LoginForm() {
             </p>
             <div className="auth-highlight-preview">
               <Highlighter size={15} />
-              <span>“A well-kept margin turns reading into a conversation.”</span>
+              <span>
+                “A well-kept margin turns reading into a conversation.”
+              </span>
             </div>
             <footer>
               <span>#institutions</span>

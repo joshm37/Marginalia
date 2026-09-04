@@ -32,13 +32,12 @@ export const researchService = {
   },
   excerpts: {
     list: (userId: string) => excerpts.list(userId),
+    listPage: (userId: string, pagination: { skip: number; take: number }) =>
+      excerpts.listPage(userId, pagination),
     create: (userId: string, input: CreateExcerptInput) =>
       excerpts.create(userId, input),
-    update: (
-      userId: string,
-      excerptId: string,
-      input: CreateExcerptInput,
-    ) => excerpts.update(userId, excerptId, input),
+    update: (userId: string, excerptId: string, input: CreateExcerptInput) =>
+      excerpts.update(userId, excerptId, input),
     delete: (userId: string, excerptId: string) =>
       excerpts.delete(userId, excerptId),
   },

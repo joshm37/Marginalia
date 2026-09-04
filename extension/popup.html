@@ -66,6 +66,15 @@
             </select></label
           >
         </div>
+        <details class="citation-details">
+          <summary>More citation details</summary>
+          <label>Journal or container<input id="containerTitle" /></label>
+          <div class="row citation-number-row">
+            <label>Volume<input id="volume" /></label>
+            <label>Issue<input id="issue" /></label>
+            <label>Pages<input id="pages" /></label>
+          </div>
+        </details>
         <label
           >Project<select id="project" required>
             <option value="" disabled>Select a project</option>
@@ -81,16 +90,47 @@
             Create
           </button>
         </div>
-        <label>Tags</label><div class="tag-editor" id="sourceTagEditor"><div class="tag-control"><input aria-label="Add tag" placeholder="Type a tag and press Enter" /></div><div class="tag-options hidden"></div></div>
+        <label>Tags</label>
+        <div class="tag-editor" id="sourceTagEditor">
+          <div class="tag-control">
+            <input
+              aria-label="Add tag"
+              placeholder="Type a tag and press Enter"
+            />
+          </div>
+          <div class="tag-options hidden"></div>
+        </div>
         <label>Note<textarea id="notes"></textarea></label
         ><button id="save" type="submit" class="primary">
           Save to Marginalia
         </button>
       </form>
+      <form id="excerpt" class="hidden">
+        <div class="capture-heading">
+          <div><h2>Save selected excerpt</h2><p id="excerptDestination"></p></div>
+          <span id="excerptPageBadge">Selection</span>
+        </div>
+        <blockquote id="excerptText"></blockquote>
+        <div class="row excerpt-fields">
+          <label>Type<select id="excerptType">
+            <option>Evidence</option><option>Summary</option><option>Question</option>
+            <option>Counterargument</option><option>Note</option>
+          </select></label>
+          <label>Page<input id="excerptPage" inputmode="numeric" /></label>
+        </div>
+        <label>Tags<input id="excerptTags" placeholder="e.g. evidence, methods" /></label>
+        <label>Excerpt note<textarea id="excerptNote"></textarea></label>
+        <button id="saveExcerpt" type="submit" class="primary">Save excerpt</button>
+        <p class="keyboard-hint">Tip: select text and press Alt + Shift + M from any supported page.</p>
+      </form>
       <section id="success" class="state hidden">
         <div class="success-icon">✓</div>
-        <h2>Saved to Marginalia</h2>
-        <p>This source is now available in your dashboard.</p>
+        <h2 id="successTitle">Saved to Marginalia</h2>
+        <p id="successMessage">This source is now available in your dashboard.</p>
+        <div class="success-actions">
+          <button id="openSavedSource" class="primary hidden">Open source</button>
+          <button id="openSavedProject" class="secondary hidden">Open project</button>
+        </div>
         <button id="saveAnother" class="secondary">Back to source</button>
       </section>
       <div id="status" role="alert"></div>

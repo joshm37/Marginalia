@@ -4,6 +4,7 @@ import type {
   CreateSourceInput,
   SourceRepository,
 } from "@/lib/repositories/contracts";
+import { NotFoundError } from "@/lib/api/errors";
 
 const sourceInclude = {
   projects: { include: { project: true } },
@@ -18,6 +19,23 @@ export class PrismaSourceRepository implements SourceRepository {
       include: sourceInclude,
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  async listPage(
+    userId: string,
+    { skip, take }: { skip: number; take: number },
+  ) {
+    const [rows, total] = await prisma.$transaction([
+      prisma.source.findMany({
+        where: { userId },
+        include: sourceInclude,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      prisma.source.count({ where: { userId } }),
+    ]);
+    return { rows, total };
   }
 
   findDuplicate(
@@ -43,12 +61,15 @@ export class PrismaSourceRepository implements SourceRepository {
       normalizedDoi?: string;
     },
   ) {
-    const ownedProjects = input.projectIds?.length
+    const requestedProjectIds = [...new Set(input.projectIds ?? [])];
+    const ownedProjects = requestedProjectIds.length
       ? await prisma.project.findMany({
-          where: { userId, id: { in: input.projectIds }, deletedAt: null },
+          where: { userId, id: { in: requestedProjectIds }, deletedAt: null },
           select: { id: true },
         })
       : [];
+    if (ownedProjects.length !== requestedProjectIds.length)
+      throw new NotFoundError("Project not found");
 
     return prisma.source.create({
       data: {
@@ -197,10 +218,15 @@ export class PrismaSourceRepository implements SourceRepository {
         publicationDate: input.publicationDate || null,
         sourceType: input.sourceType,
         url: input.url,
+        canonicalUrl: input.canonicalUrl || null,
         normalizedUrl: input.normalizedUrl,
+        doi: input.doi || null,
         description: input.description || null,
         bibliographyAnnotation: input.bibliographyAnnotation || null,
         notes: input.notes || null,
+        citationMetadata: input.citationMetadata as
+          | Prisma.InputJsonValue
+          | undefined,
         projects: {
           deleteMany: {},
           create: { projectId },

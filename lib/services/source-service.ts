@@ -2,20 +2,15 @@ import type {
   CreateSourceInput,
   SourceRepository,
 } from "@/lib/repositories/contracts";
+import { ConflictError, ValidationError } from "@/lib/api/errors";
+import { normalizeDoi } from "@/lib/citations/identifiers";
 
-export class DuplicateSourceError extends Error {
+export { normalizeDoi } from "@/lib/citations/identifiers";
+
+export class DuplicateSourceError extends ConflictError {
   constructor(public readonly existingSource: unknown) {
     super("This source is already in your library");
   }
-}
-
-export function normalizeDoi(doi?: string) {
-  const value = doi
-    ?.trim()
-    .toLowerCase()
-    .replace(/^https?:\/\/(dx\.)?doi\.org\//, "")
-    .replace(/^doi:\s*/, "");
-  return value || undefined;
 }
 
 export function normalizeUrl(rawUrl: string) {
@@ -43,6 +38,10 @@ export class SourceService {
     return this.sources.list(userId);
   }
 
+  listPage(userId: string, pagination: { skip: number; take: number }) {
+    return this.sources.listPage(userId, pagination);
+  }
+
   async checkDuplicate(
     userId: string,
     values: { doi?: string; canonicalUrl?: string; url: string },
@@ -61,7 +60,7 @@ export class SourceService {
   }
 
   moveToProject(userId: string, sourceId: string, projectId: string) {
-    if (!projectId) throw new Error("A project is required");
+    if (!projectId) throw new ValidationError("A project is required");
     return this.sources.moveToProject(userId, sourceId, projectId);
   }
 
@@ -74,20 +73,26 @@ export class SourceService {
   }
 
   update(userId: string, sourceId: string, input: CreateSourceInput) {
-    if (!input.title.trim()) throw new Error("A source title is required");
+    if (!input.title.trim())
+      throw new ValidationError("A source title is required");
     if (!input.projectIds?.length)
-      throw new Error("A project is required to save a source");
+      throw new ValidationError("A project is required to save a source");
     return this.sources.update(userId, sourceId, {
       ...input,
       title: input.title.trim(),
+      doi: normalizeDoi(input.doi),
+      canonicalUrl: input.canonicalUrl
+        ? normalizeUrl(input.canonicalUrl)
+        : undefined,
       normalizedUrl: normalizeUrl(input.url),
     });
   }
 
   async create(userId: string, input: CreateSourceInput) {
-    if (!input.title.trim()) throw new Error("A source title is required");
+    if (!input.title.trim())
+      throw new ValidationError("A source title is required");
     if (!input.projectIds?.length)
-      throw new Error("A project is required to save a source");
+      throw new ValidationError("A project is required to save a source");
     const normalizedDoi = normalizeDoi(input.doi);
     const normalizedUrl = normalizeUrl(input.url);
     const canonicalUrl = input.canonicalUrl

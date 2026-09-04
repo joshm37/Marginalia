@@ -42,6 +42,10 @@ export type CreateExcerptInput = {
 
 export interface SourceRepository {
   list(userId: string): Promise<unknown[]>;
+  listPage(
+    userId: string,
+    pagination: { skip: number; take: number },
+  ): Promise<{ rows: unknown[]; total: number }>;
   findDuplicate(
     userId: string,
     values: { doi?: string; canonicalUrl?: string; normalizedUrl: string },
@@ -88,6 +92,10 @@ export interface ProjectRepository {
 
 export interface ExcerptRepository {
   list(userId: string): Promise<unknown[]>;
+  listPage(
+    userId: string,
+    pagination: { skip: number; take: number },
+  ): Promise<{ rows: unknown[]; total: number }>;
   create(userId: string, input: CreateExcerptInput): Promise<unknown>;
   update(
     userId: string,

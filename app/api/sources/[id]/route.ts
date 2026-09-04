@@ -4,6 +4,9 @@ import { requireUser } from "@/lib/auth/require-user";
 import { apiError } from "@/lib/api/responses";
 import { sourceDto } from "@/lib/api/dto";
 import { researchService } from "@/lib/services/research-service";
+import { sourcePatchSchema } from "@/lib/api/schemas";
+import { parseJson, parseResourceId } from "@/lib/api/validation";
+import { normalizeReviewedCitation } from "@/lib/citations/normalized";
 
 export async function DELETE(
   request: NextRequest,
@@ -11,13 +14,13 @@ export async function DELETE(
 ) {
   try {
     const user = await requireUser(request);
-    const { id } = await params;
+    const id = parseResourceId((await params).id);
     const deleted = await researchService.sources.delete(user.id, id);
     return deleted
       ? new NextResponse(null, { status: 204 })
       : NextResponse.json({ error: "Source not found" }, { status: 404 });
   } catch (error) {
-    return apiError(error);
+    return apiError(error, request);
   }
 }
 
@@ -27,42 +30,47 @@ export async function PATCH(
 ) {
   try {
     const user = await requireUser(request);
-    const { id } = await params;
-    const body = await request.json();
-    const row =
-      body.action === "updateBibliographyAnnotation"
-        ? await researchService.sources.updateBibliographyAnnotation(
-            user.id,
-            id,
-            {
-              bibliographyAnnotation: String(body.bibliographyAnnotation ?? ""),
-              includeInBibliography: body.includeInBibliography !== false,
-            },
-          )
-        : body.title
-          ? await researchService.sources.update(user.id, id, {
-              title: String(body.title),
-              authors: body.authors || undefined,
-              organization: body.organization || undefined,
-              publicationDate: body.date ? new Date(body.date) : undefined,
-              sourceType:
-                SourceType[
-                  String(
-                    body.type ?? "Article",
-                  ).toUpperCase() as keyof typeof SourceType
-                ] ?? SourceType.ARTICLE,
-              url: String(body.url ?? ""),
-              description: body.description || undefined,
-              bibliographyAnnotation: body.bibliographyAnnotation || undefined,
-              notes: body.notes || undefined,
-              projectIds: Array.isArray(body.projects) ? body.projects : [],
-              tagNames: Array.isArray(body.tags) ? body.tags : [],
-            })
-          : await researchService.sources.moveToProject(
-              user.id,
-              id,
-              String(body.projectId ?? ""),
-            );
+    const id = parseResourceId((await params).id);
+    const body = await parseJson(request, sourcePatchSchema);
+    let row;
+    if ("action" in body) {
+      row = await researchService.sources.updateBibliographyAnnotation(
+        user.id,
+        id,
+        {
+          bibliographyAnnotation: String(body.bibliographyAnnotation ?? ""),
+          includeInBibliography: body.includeInBibliography !== false,
+        },
+      );
+    } else if ("title" in body) {
+      row = await researchService.sources.update(user.id, id, {
+        title: body.title,
+        authors: body.authors || undefined,
+        organization: body.organization || undefined,
+        publicationDate: body.date ? new Date(body.date) : undefined,
+        sourceType:
+          SourceType[
+            String(
+              body.type ?? "Article",
+            ).toUpperCase() as keyof typeof SourceType
+          ] ?? SourceType.ARTICLE,
+        url: body.url,
+        canonicalUrl: body.canonicalUrl || undefined,
+        doi: body.doi || undefined,
+        citationMetadata: normalizeReviewedCitation(body),
+        description: body.description || undefined,
+        bibliographyAnnotation: body.bibliographyAnnotation || undefined,
+        notes: body.notes || undefined,
+        projectIds: body.projects,
+        tagNames: body.tags,
+      });
+    } else {
+      row = await researchService.sources.moveToProject(
+        user.id,
+        id,
+        body.projectId,
+      );
+    }
     return row
       ? NextResponse.json(sourceDto(row as Parameters<typeof sourceDto>[0]))
       : NextResponse.json(
@@ -70,6 +78,6 @@ export async function PATCH(
           { status: 404 },
         );
   } catch (error) {
-    return apiError(error);
+    return apiError(error, request);
   }
 }

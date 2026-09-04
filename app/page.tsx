@@ -1,2 +1,5 @@
-import App from '@/components/App';
-export default function Page() { return <App />; }
+import { WorkspaceRoute } from "@/components/workspace/WorkspaceRoute";
+
+export default function Page() {
+  return <WorkspaceRoute view="Dashboard" />;
+}

@@ -8,6 +8,19 @@ export type Source = {
   title: string;
   authors: string;
   organization: string;
+  doi?: string;
+  containerTitle?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  editors?: string;
+  translators?: string;
+  edition?: string;
+  publisherPlace?: string;
+  isbn?: string;
+  issn?: string;
+  accessedDate?: string;
+  citationData?: NormalizedCitationData;
   date: string;
   url: string;
   type: SourceType;
@@ -39,3 +52,4 @@ export type Project = {
   isActive: boolean;
   deletedAt: string | null;
 };
+import type { NormalizedCitationData } from "@/lib/citations/types";

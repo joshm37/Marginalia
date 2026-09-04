@@ -4,6 +4,7 @@ import type {
   CreateExcerptInput,
   ExcerptRepository,
 } from "@/lib/repositories/contracts";
+import { NotFoundError } from "@/lib/api/errors";
 
 export class PrismaExcerptRepository implements ExcerptRepository {
   list(userId: string) {
@@ -12,6 +13,24 @@ export class PrismaExcerptRepository implements ExcerptRepository {
       include: { projects: true, tags: { include: { tag: true } } },
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  async listPage(
+    userId: string,
+    { skip, take }: { skip: number; take: number },
+  ) {
+    const include = { projects: true, tags: { include: { tag: true } } };
+    const [rows, total] = await prisma.$transaction([
+      prisma.excerpt.findMany({
+        where: { userId },
+        include,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      prisma.excerpt.count({ where: { userId } }),
+    ]);
+    return { rows, total };
   }
 
   async create(userId: string, input: CreateExcerptInput) {
@@ -27,7 +46,9 @@ export class PrismaExcerptRepository implements ExcerptRepository {
           })
         : [],
     ]);
-    if (!source) throw new Error("Source not found");
+    if (!source) throw new NotFoundError("Source not found");
+    if (projects.length !== new Set(input.projectIds ?? []).size)
+      throw new NotFoundError("Project not found");
 
     return prisma.excerpt.create({
       data: {
@@ -66,11 +87,7 @@ export class PrismaExcerptRepository implements ExcerptRepository {
     });
   }
 
-  async update(
-    userId: string,
-    excerptId: string,
-    input: CreateExcerptInput,
-  ) {
+  async update(userId: string, excerptId: string, input: CreateExcerptInput) {
     const [excerpt, source, projects] = await Promise.all([
       prisma.excerpt.findFirst({
         where: { id: excerptId, userId },
@@ -88,6 +105,8 @@ export class PrismaExcerptRepository implements ExcerptRepository {
         : [],
     ]);
     if (!excerpt || !source) return null;
+    if (projects.length !== new Set(input.projectIds ?? []).size)
+      throw new NotFoundError("Project not found");
     const oldLocation =
       excerpt.locationData && typeof excerpt.locationData === "object"
         ? (excerpt.locationData as Record<string, unknown>)

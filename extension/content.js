@@ -101,9 +101,16 @@ function captureSelection(selection) {
       title: document.title,
       x: Math.round(rect.x),
       y: Math.round(rect.y),
+      pageNumber:
+        location.hash.match(/(?:^#|[&#])page=(\d+)/i)?.[1] ||
+        new URLSearchParams(location.search).get("page") ||
+        undefined,
     },
   };
 }
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === "capture-current-selection") queueSelection();
+});
 async function showPopup(selection) {
   const captured = captureSelection(selection);
   if (
@@ -264,7 +271,7 @@ async function showPopup(selection) {
         },
       });
       if (result?.error) throw new Error(result.error);
-      message.textContent = "Saved to Marginalia";
+      message.textContent = result?.queued ? "Queued — will retry automatically" : "Saved to Marginalia";
       message.classList.add("done");
       button.textContent = "Saved";
       setTimeout(removePopup, 900);
@@ -329,4 +336,11 @@ syncDashboardTheme();
 new MutationObserver(syncDashboardTheme).observe(document.documentElement, {
   attributes: true,
   attributeFilter: ["data-theme"],
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.marginaliaTheme && marginaliaHost)
+    marginaliaHost.setAttribute(
+      "data-theme",
+      changes.marginaliaTheme.newValue || "light",
+    );
 });
