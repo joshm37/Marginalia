@@ -2,7 +2,8 @@
 
 import { FileCheck2, FileUp, Link2, LoaderCircle, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { displayCitationNames } from "@/lib/citations/normalized";
+import { displayCitationNames, parseAuthorText } from "@/lib/citations/normalized";
+import { ContributorFields } from "@/components/ui/ContributorFields";
 import { readJsonResponse } from "@/lib/client/api";
 import type { Annotation, Project, Source, SourceType } from "@/lib/types";
 import type { MetadataField, MetadataProvenance } from "@/lib/metadata/types";
@@ -181,15 +182,15 @@ export function SourceModal({
   const [duplicateSource, setDuplicateSource] = useState<Source>();
   const [f, setF] = useState({
     title: initialSource?.title || "",
-    authors: initialSource?.authors || "",
+    authors: (initialSource?.citationData?.authors ?? parseAuthorText(initialSource?.authors || "")).map((name) => displayCitationNames([name])).join("\n"),
     organization: initialSource?.organization || "",
     doi: initialSource?.doi || "",
     containerTitle: initialSource?.containerTitle || "",
     volume: initialSource?.volume || "",
     issue: initialSource?.issue || "",
     pages: initialSource?.pages || "",
-    editors: initialSource?.editors || "",
-    translators: initialSource?.translators || "",
+    editors: (initialSource?.citationData?.editors ?? parseAuthorText(initialSource?.editors || "")).map((name) => displayCitationNames([name])).join("\n"),
+    translators: (initialSource?.citationData?.translators ?? parseAuthorText(initialSource?.translators || "")).map((name) => displayCitationNames([name])).join("\n"),
     edition: initialSource?.edition || "",
     publisherPlace: initialSource?.publisherPlace || "",
     isbn: initialSource?.isbn || "",
@@ -264,8 +265,8 @@ export function SourceModal({
         volume: data.volume || "",
         issue: data.issue || "",
         pages: data.pages || "",
-        editors: displayCitationNames(data.citationData?.editors || []),
-        translators: displayCitationNames(data.citationData?.translators || []),
+        editors: (data.citationData?.editors || []).map((name: NonNullable<Parameters<typeof displayCitationNames>[0]>[number]) => displayCitationNames([name])).join("\n"),
+        translators: (data.citationData?.translators || []).map((name: NonNullable<Parameters<typeof displayCitationNames>[0]>[number]) => displayCitationNames([name])).join("\n"),
         edition: data.citationData?.edition || "",
         publisherPlace: data.citationData?.publisherPlace || "",
         isbn: data.citationData?.isbn?.join(", ") || "",
@@ -386,8 +387,8 @@ export function SourceModal({
         volume: resolved.volume || "",
         issue: resolved.issue || "",
         pages: resolved.pages || "",
-        editors: displayCitationNames(resolved.citationData?.editors || []),
-        translators: displayCitationNames(resolved.citationData?.translators || []),
+        editors: (resolved.citationData?.editors || []).map((name) => displayCitationNames([name])).join("\n"),
+        translators: (resolved.citationData?.translators || []).map((name) => displayCitationNames([name])).join("\n"),
         edition: resolved.citationData?.edition || "",
         publisherPlace: resolved.citationData?.publisherPlace || "",
         isbn: resolved.isbn || "",
@@ -436,7 +437,7 @@ export function SourceModal({
         .split("\n")
         .map((value) => value.trim())
         .filter(Boolean)
-        .join(", "),
+        .join("\n"),
       organization: f.organization,
       doi: f.doi,
       containerTitle: f.containerTitle,
@@ -684,10 +685,10 @@ export function SourceModal({
           </div>
           <div className="form-row">
             <div className="field compact-textarea">
-              <label>AUTHORS · ONE PER LINE {fieldStatus("authors")}</label>
-              <textarea
+              <label>AUTHORS {fieldStatus("authors")}</label>
+              <ContributorFields role="Author"
                 value={f.authors}
-                onChange={(e) => setField("authors", e.target.value, "authors")}
+                onChange={(value) => setField("authors", value, "authors")}
               />
             </div>
             <div className="field page-number-field">
@@ -700,17 +701,17 @@ export function SourceModal({
           </div>
           <div className="form-row">
             <div className="field compact-textarea">
-              <label>EDITORS · ONE PER LINE {fieldStatus("editors")}</label>
-              <textarea
+              <label>EDITORS {fieldStatus("editors")}</label>
+              <ContributorFields role="Editor"
                 value={f.editors}
-                onChange={(e) => setField("editors", e.target.value, "editors")}
+                onChange={(value) => setField("editors", value, "editors")}
               />
             </div>
             <div className="field compact-textarea">
-              <label>TRANSLATORS · ONE PER LINE {fieldStatus("translators")}</label>
-              <textarea
+              <label>TRANSLATORS {fieldStatus("translators")}</label>
+              <ContributorFields role="Translator"
                 value={f.translators}
-                onChange={(e) => setField("translators", e.target.value, "translators")}
+                onChange={(value) => setField("translators", value, "translators")}
               />
             </div>
           </div>

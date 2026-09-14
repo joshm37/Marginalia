@@ -33,7 +33,9 @@
             autocomplete="current-password" /></label
         ><button type="submit" class="primary">Sign in</button>
       </form>
+      <section id="capture-error" class="state hidden"><h2>Document capture unavailable</h2><p>Follow the instructions below, then reopen Marginalia to retry.</p></section>
       <form id="capture" class="hidden">
+        <p id="localPdfInfo"></p>
         <div class="capture-heading">
           <div>
             <h2>Save this source</h2>
@@ -41,13 +43,10 @@
           </div>
           <span id="typeBadge">Website</span>
         </div>
-        <label>Title<input id="title" required /></label
-        ><label
-          >Authors · one per line<textarea
-            id="authors"
-            class="authors"
-          ></textarea>
-        </label>
+        <label>Title<input id="title" required /></label>
+        <div class="contributor-group"><span>Authors</span><div id="authors"></div></div>
+        <div class="contributor-group"><span>Editors</span><div id="editors"></div></div>
+        <div class="contributor-group"><span>Translators</span><div id="translators"></div></div>
         <div class="row">
           <label>Organization<input id="organization" /></label
           ><label>Published<input id="date" type="date" /></label>

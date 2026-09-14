@@ -9,6 +9,15 @@
   --gold: #a87c2f;
   --danger: #9b4b43;
 }
+.contributor-fields { display: grid; gap: 6px; min-width: 0; }
+.contributor-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.contributor-row input { flex: 1; min-width: 0; }
+.contributor-add, .contributor-remove { display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 0; background: transparent; cursor: pointer; border-radius: 6px; }
+.contributor-add { justify-self: start; color: var(--accent); font: inherit; font-size: 12px; padding: 5px 6px; }
+.contributor-remove { color: var(--muted); padding: 7px; }
+.contributor-add:hover { background: var(--accent-soft); }
+.contributor-remove:hover { color: var(--danger); background: var(--bg); }
+.contributor-add:focus-visible, .contributor-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [data-theme="dark"] {
   --bg: #000;
   --panel: #0d0d0d;

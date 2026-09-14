@@ -1,6 +1,10 @@
 # Chrome Web Store Listing — Marginalia
 
-> Last Updated: 2026-09-09
+Contributor review now uses individual author, editor, and translator inputs with add/remove controls. Refresh source-review screenshots before the next store submission; release version remains unchanged.
+
+> Last Updated: 2026-09-14
+
+Local PDF capture: `file:///*` host access lets Marginalia read a PDF selected by the active tab only after the user enables Chrome's “Allow access to file URLs” setting. Bytes are processed locally for hashing and citation metadata. Only the safe filename, hash, size, citation metadata, and selected research records are sent to Marginalia; filesystem URLs are not sent. Refresh permission disclosures and popup screenshots before release. Release version remains 0.6.1 pending submission.
 
 ## Store Listing
 

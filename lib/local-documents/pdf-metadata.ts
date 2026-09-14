@@ -43,10 +43,12 @@ export async function extractLocalPdfMetadata(file: File): Promise<LocalPdfMetad
     import.meta.url,
   ).toString();
   const bytes = new Uint8Array(await file.arrayBuffer());
+  const loadingTask = pdfjs.getDocument({ data: bytes });
   let document: Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>;
   try {
-    document = await pdfjs.getDocument({ data: bytes }).promise;
+    document = await loadingTask.promise;
   } catch {
+    await loadingTask.destroy();
     throw new Error("This PDF appears to be corrupted, encrypted, or unreadable.");
   }
   try {
@@ -91,6 +93,6 @@ export async function extractLocalPdfMetadata(file: File): Promise<LocalPdfMetad
       provenance,
     };
   } finally {
-    document.cleanup();
+    await loadingTask.destroy();
   }
 }

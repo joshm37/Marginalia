@@ -4,14 +4,14 @@
 
 ```sh
 npm run extension:build:dev
-EXTENSION_API_BASE=https://your-marginalia-domain.example npm run extension:build
+EXTENSION_API_BASE=https://your-marginalia-domain.example npm run extension:build:production
 ```
 
 The uploadable ZIP is written to `.extension-build/`. Production builds reject HTTP URLs and replace both the API configuration and host permissions with the deployed origin.
 
 ## Submission checklist
 
-1. Test the unpacked `.extension-build/marginalia` directory in `chrome://extensions`.
+1. Test the unpacked `.extension-build/production` directory in `chrome://extensions`. Development uses `.extension-build/marginalia`; see [development workflow](EXTENSION_DEVELOPMENT.md).
 2. Verify sign-in, source capture, duplicate detection, excerpt capture, queued retry, and dashboard links against production.
 3. Upload the generated ZIP to the Chrome Web Store developer dashboard.
 4. Supply store screenshots, a 1280×800 promotional image, support URL, and privacy-policy URL.

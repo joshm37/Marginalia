@@ -134,11 +134,11 @@ The browser suite uses a development-only authentication fixture. Both the serve
 
 1. Start Marginalia with `npm run dev`.
 2. Open `chrome://extensions`, enable Developer mode, and choose **Load unpacked**.
-3. Select the repository's `extension` directory.
+3. Run `npm run extension:build`, then select `.extension-build/marginalia` (not `extension/`).
 4. Open an article, click the Marginalia extension, and sign in with your existing account.
 5. Review the extracted metadata, choose a project, and save.
 6. Close the extension popup and highlight text on the saved page.
 7. Add an excerpt type, tags, and a note in the in-page Marginalia prompt.
 8. Return to the dashboard; it refreshes on focus and displays the source and excerpt.
 
-The source extension targets `http://localhost:3000` for local development. Create a production Chrome Web Store package with `EXTENSION_API_BASE=https://your-domain.example npm run extension:build`; the build safely replaces the API origin and host permission without editing source files. See [the extension release checklist](docs/chrome-web-store.md).
+Development builds target `http://localhost:3000`. Use `npm run extension:dev` to rebuild on source changes; reload the extension and target webpage after each build. See [extension development](docs/EXTENSION_DEVELOPMENT.md). Create a production Chrome Web Store package with `EXTENSION_API_BASE=https://your-domain.example npm run extension:build:production`; production output is separate from development output. See [the extension release checklist](docs/chrome-web-store.md).

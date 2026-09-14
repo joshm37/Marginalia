@@ -8,8 +8,35 @@ import {
   appUrl,
 } from "./api-service.js";
 import { normalizeUrl } from "./url-normalization.js";
+import { classifyCapture, captureLocalPdf } from "./local-pdf.js";
+let localCapture;
 const $ = (selector) => document.querySelector(selector);
-const views = ["loading", "login", "capture", "excerpt", "success"];
+function contributorValues(id) {
+  return [...$(`#${id}`).querySelectorAll("input")].map((input) => input.value.trim()).filter(Boolean);
+}
+function renderContributors(id, values, singular) {
+  const root = $(`#${id}`);
+  root.replaceChildren();
+  function addRow(value = "", focus = false) {
+    const row = document.createElement("div"); row.className = "contributor-row";
+    const input = document.createElement("input"); input.value = value;
+    input.setAttribute("aria-label", singular);
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "contributor-remove";
+    remove.textContent = "×"; remove.setAttribute("aria-label", `Remove ${singular.toLowerCase()}`);
+    remove.addEventListener("click", () => {
+      if (root.querySelectorAll("input").length === 1) { input.value = ""; input.focus(); }
+      else { row.remove(); root.querySelector("input")?.focus(); }
+    });
+    row.append(input, remove); root.insertBefore(row, add);
+    if (focus) input.focus();
+  }
+  const add = document.createElement("button"); add.type = "button"; add.className = "contributor-add";
+  add.textContent = `+ Add ${singular.toLowerCase()}`;
+  add.addEventListener("click", () => addRow("", true)); root.append(add);
+  (values.length ? values : [""]).forEach((value) => addRow(value));
+}
+const nameText = (person) => person.literal || [person.given, person.family, person.suffix].filter(Boolean).join(" ");
+const views = ["loading", "login", "capture", "excerpt", "success", "capture-error"];
 const show = (id) =>
   views.forEach((view) =>
     $(`#${view}`).classList.toggle("hidden", view !== id),
@@ -142,7 +169,13 @@ function renderProjects(projects, selectedId) {
 async function extractPage() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("No active page found");
-  const pdfUrl = /\.pdf(?:$|[?#])/i.test(tab.url || "");
+  const context = classifyCapture(tab);
+  if (context.type === "UNSUPPORTED") throw new Error(context.reason);
+  if (context.type === "LOCAL_PDF") return captureLocalPdf(context, {
+    allowed: () => chrome.extension.isAllowedFileSchemeAccess(),
+    loadUtilities: () => import("./local-document-utils.js"),
+  });
+  const pdfUrl = context.type === "REMOTE_PDF";
   if (pdfUrl)
     return {
       title: (tab.title || "PDF document").replace(/\.pdf\s*$/i, ""),
@@ -374,7 +407,18 @@ async function openCapture() {
     }
   }
   const cached = await chrome.storage.local.get(PROJECTS_KEY);
-  let page = await extractPage();
+  let page;
+  localCapture = undefined;
+  try { page = await extractPage(); }
+  catch (error) { show("capture-error"); status(error.message); return; }
+  if (page.storageMode === "LOCAL") {
+    localCapture = page;
+    const duplicate = await checkDuplicate({ fileHash: page.localFile.sha256 });
+    if (duplicate.source) {
+      showSuccess({ title: "This PDF is already in Marginalia", message: "Open the source to continue with its excerpts and project settings.", sourceId: duplicate.source.id, projectId: duplicate.source.projects?.[0] });
+      return;
+    }
+  }
   if (page.doi) {
     try {
       const enriched = await enrichDoi(page.doi);
@@ -394,7 +438,12 @@ async function openCapture() {
   const projects = cached[PROJECTS_KEY] || [];
   $("#title").value = page.title || "";
   $("#url").value = page.url || "";
-  $("#authors").value = (page.authors || []).join("\n");
+  $("#url").required = !localCapture;
+  $("#url").closest("label").classList.toggle("hidden", Boolean(localCapture));
+  $("#localPdfInfo").textContent = localCapture ? `${localCapture.localFile.filename} · Local PDF · ${localCapture.pageCount} pages` : "";
+  renderContributors("authors", page.authors || [], "Author");
+  renderContributors("editors", (page.citationData?.editors || []).map(nameText), "Editor");
+  renderContributors("translators", (page.citationData?.translators || []).map(nameText), "Translator");
   $("#organization").value = page.organization || "";
   $("#date").value = /^\d{4}-\d{2}-\d{2}$/.test(page.date) ? page.date : "";
   $("#doi").value = page.doi || "";
@@ -476,13 +525,14 @@ $("#capture").addEventListener("submit", async (event) => {
   try {
     const source = {
       title: $("#title").value.trim(),
-      url: $("#url").value,
-      canonicalUrl: event.currentTarget.dataset.canonicalUrl || undefined,
-      authors: $("#authors")
-        .value.split("\n")
-        .map((value) => value.trim())
-        .filter(Boolean)
-        .join(", "),
+      storageMode: localCapture ? "LOCAL" : "WEB",
+      localFile: localCapture?.localFile,
+      metadataProvenance: localCapture?.metadataProvenance,
+      url: localCapture ? undefined : $("#url").value,
+      canonicalUrl: localCapture ? undefined : event.currentTarget.dataset.canonicalUrl || undefined,
+      authors: contributorValues("authors").join("\n"),
+      editors: contributorValues("editors").join("\n"),
+      translators: contributorValues("translators").join("\n"),
       organization: $("#organization").value.trim(),
       date: $("#date").value,
       doi: $("#doi").value.trim(),
@@ -496,7 +546,7 @@ $("#capture").addEventListener("submit", async (event) => {
       notes: $("#notes").value.trim(),
       citationData: sourceCitationData,
     };
-    const duplicate = await checkDuplicate(source);
+    const duplicate = await checkDuplicate(localCapture ? { fileHash: localCapture.localFile.sha256 } : source);
     if (duplicate.duplicate) {
       const existingProject = duplicate.source.projects?.[0] || $("#project").value;
       showSuccess({
@@ -525,7 +575,7 @@ $("#capture").addEventListener("submit", async (event) => {
       projectName: project?.name || "Project",
     };
     const mappings = stored[SOURCES_KEY] || {};
-    mappings[normalizeUrl(source.url)] = context;
+    mappings[localCapture ? `sha256:${localCapture.localFile.sha256}` : normalizeUrl(source.url)] = context;
     if (source.canonicalUrl)
       mappings[normalizeUrl(source.canonicalUrl)] = context;
     await chrome.storage.local.set({ [SOURCES_KEY]: mappings });

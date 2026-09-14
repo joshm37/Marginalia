@@ -5,6 +5,7 @@ const pdfMock = vi.hoisted(() => ({ corrupted: false }));
 vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
   getDocument: () => ({
+    destroy: vi.fn().mockResolvedValue(undefined),
     promise: pdfMock.corrupted
       ? Promise.reject(new Error("invalid pdf"))
       : Promise.resolve({

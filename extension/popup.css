@@ -29,6 +29,14 @@
 * {
   box-sizing: border-box;
 }
+.contributor-group { margin: 10px 0; color: var(--muted); font-size: 12px; }
+.contributor-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.contributor-row input { flex: 1; min-width: 0; margin: 0; }
+button.contributor-add, button.contributor-remove { width: auto; border: 0; background: transparent; box-shadow: none; min-height: 28px; margin: 4px 0 0; padding: 4px 6px; }
+button.contributor-add { color: var(--green); font-size: 12px; }
+button.contributor-remove { color: var(--muted); font-size: 18px; flex-shrink: 0; }
+button.contributor-add:hover { background: var(--green-soft); }
+button.contributor-remove:hover { color: var(--danger); }
 body {
   width: 380px;
   max-height: 590px;
