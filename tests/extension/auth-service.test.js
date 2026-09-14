@@ -77,4 +77,42 @@ describe("extension authentication", () => {
     await expect(getAccessToken()).resolves.toBe("new");
     expect(stored.accessToken).toBe("new");
   });
+
+  it("coalesces simultaneous refresh attempts so rotated tokens are used once", async () => {
+    stored = { accessToken: "old", refreshToken: "refresh", expiresAt: 1 };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ accessToken: "new", refreshToken: "rotated", expiresAt: 9999999999 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { getAccessToken } = await import("../../extension/auth-service.js");
+    await expect(Promise.all([getAccessToken(), getAccessToken(), getAccessToken()])).resolves.toEqual(["new", "new", "new"]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the persistent session during a temporary refresh outage", async () => {
+    stored = { accessToken: "old", refreshToken: "refresh", expiresAt: 1 };
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    const { getAccessToken } = await import("../../extension/auth-service.js");
+    await expect(getAccessToken()).rejects.toMatchObject({ code: "AUTH_UNAVAILABLE" });
+    expect(stored).toMatchObject({ refreshToken: "refresh" });
+  });
+
+  it("removes an invalid refresh session", async () => {
+    stored = { accessToken: "old", refreshToken: "invalid", expiresAt: 1 };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "Session expired" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const { getAccessToken } = await import("../../extension/auth-service.js");
+    await expect(getAccessToken()).rejects.toMatchObject({ code: "SESSION_EXPIRED" });
+    expect(stored).toBeUndefined();
+  });
 });

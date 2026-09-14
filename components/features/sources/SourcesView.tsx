@@ -1,9 +1,11 @@
 "use client";
 
-import { BookOpen, Copy, ExternalLink, FileText, Pencil, Plus, Search, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CircleAlert, Plus, Search, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { Project, Source, SourceType } from "@/lib/types";
 import { PaginationControls } from "@/components/ui/PaginationControls";
+import { readJsonResponse } from "@/lib/client/api";
+import { SourceTile } from "@/components/features/sources/SourceTile";
 
 const sourceTypes: SourceType[] = ["Article", "Report", "Case", "Bill", "Book", "Website"];
 
@@ -32,7 +34,12 @@ export function SourcesView({
   const [projectFilter, setProjectFilter] = useState("All");
   const [tagFilter, setTagFilter] = useState("All");
   const [sortBy, setSortBy] = useState("newest");
+  const [reviewOnly, setReviewOnly] = useState(false);
   const [pagination, setPagination] = useState({ scope: "", page: 1 });
+  const [serverPage, setServerPage] = useState<{ items: Source[]; total: number; pageCount: number } | null>(null);
+  const [loadingPage, setLoadingPage] = useState(false);
+  const [pageError, setPageError] = useState("");
+  const [retry, setRetry] = useState(0);
   const pageSize = 20;
   const sourceTags = [
     ...new Set(sources.flatMap((source) => source.tags)),
@@ -42,74 +49,44 @@ export function SourcesView({
       sources.some((source) => source.projects.includes(project.id)),
     )
     .sort((a, b) => a.name.localeCompare(b.name));
-  const projectMap = useMemo(
-    () => new Map(projects.map((project) => [project.id, project])),
-    [projects],
-  );
-  const visibleSources = useMemo(() => {
-    const value = sourceQuery.trim().toLowerCase();
-    return sources
-      .filter(
-        (source) =>
-          (activeType === "All" || source.type === activeType) &&
-          (projectFilter === "All" ||
-            source.projects.includes(projectFilter)) &&
-          (tagFilter === "All" || source.tags.includes(tagFilter)) &&
-          (!value ||
-            [
-              source.title,
-              source.authors,
-              source.organization,
-              source.description,
-              source.bibliographyAnnotation,
-              ...source.tags,
-            ]
-              .join(" ")
-              .toLowerCase()
-              .includes(value)),
-      )
-      .sort((a, b) => {
-        if (sortBy === "oldest") return a.createdAt.localeCompare(b.createdAt);
-        if (sortBy === "title") return a.title.localeCompare(b.title);
-        if (sortBy === "author")
-          return (a.authors || a.organization).localeCompare(
-            b.authors || b.organization,
-          );
-        if (sortBy === "publication") return b.date.localeCompare(a.date);
-        if (sortBy === "project")
-          return (projectMap.get(a.projects[0])?.name || "").localeCompare(
-            projectMap.get(b.projects[0])?.name || "",
-          );
-        if (sortBy === "tag")
-          return (a.tags[0] || "").localeCompare(b.tags[0] || "");
-        return b.createdAt.localeCompare(a.createdAt);
-      });
-  }, [
-    activeType,
-    projectFilter,
-    projectMap,
-    sortBy,
-    sourceQuery,
-    sources,
-    tagFilter,
-  ]);
   const hasSourceFilters = Boolean(
-    sourceQuery || projectFilter !== "All" || tagFilter !== "All",
+    sourceQuery || projectFilter !== "All" || tagFilter !== "All" || reviewOnly,
   );
-  const pageCount = Math.max(1, Math.ceil(visibleSources.length / pageSize));
-  const paginationScope = `${activeType}|${projectFilter}|${tagFilter}|${sourceQuery}`;
-  const page =
-    pagination.scope === paginationScope
-      ? Math.min(pagination.page, pageCount)
-      : 1;
-  const paginatedSources = visibleSources.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
-  );
+  const paginationScope = `${activeType}|${projectFilter}|${tagFilter}|${sourceQuery}|${reviewOnly}|${sortBy}`;
+  const page = pagination.scope === paginationScope ? pagination.page : 1;
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoadingPage(true);
+      setPageError("");
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), sort: sortBy });
+      if (sourceQuery.trim()) params.set("q", sourceQuery.trim());
+      if (activeType !== "All") params.set("type", activeType);
+      if (projectFilter !== "All") params.set("projectId", projectFilter);
+      if (tagFilter !== "All") params.set("tag", tagFilter);
+      if (reviewOnly) params.set("reviewOnly", "true");
+      try {
+        const response = await fetch(`/api/sources?${params}`, { cache: "no-store", signal: controller.signal });
+        const data = await readJsonResponse(response) as { items: Source[]; total: number; pageCount: number; error?: string };
+        if (!response.ok) throw new Error(data.error || "Could not load sources");
+        setServerPage(data);
+      } catch (error) {
+        if (!controller.signal.aborted) setPageError(error instanceof Error ? error.message : "Could not load sources");
+      } finally {
+        if (!controller.signal.aborted) setLoadingPage(false);
+      }
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [activeType, page, projectFilter, retry, sortBy, sourceQuery, sources, tagFilter, reviewOnly]);
+  const paginatedSources = serverPage?.items ?? sources.slice(0, pageSize);
+  const totalSources = serverPage?.total ?? sources.length;
+  const pageCount = Math.max(1, serverPage?.pageCount ?? Math.ceil(sources.length / pageSize));
+  const showInitialLoading = loadingPage && !serverPage && !sources.length;
   function clearSourceFilters() {
     setSourceQuery("");
     setProjectFilter("All");
     setTagFilter("All");
+    setReviewOnly(false);
     onType("All");
   }
   return (
@@ -135,6 +112,14 @@ export function SourcesView({
             {t === "All" && <span>{sources.length}</span>}
           </button>
         ))}
+        <button
+          className={`filter review-filter ${reviewOnly ? "active" : ""}`}
+          aria-pressed={reviewOnly}
+          onClick={() => setReviewOnly((value) => !value)}
+        >
+          <CircleAlert size={14} /> Needs review
+          <span>{sources.filter((source) => source.metadataNeedsReview).length}</span>
+        </button>
       </div>
       <section className="card source-library-controls">
         <div className="source-library-search">
@@ -188,7 +173,7 @@ export function SourcesView({
         </label>
         <div className="source-results-summary">
           <span>
-            {visibleSources.length} of {sources.length} sources
+            {totalSources} source{totalSources === 1 ? "" : "s"}
           </span>
           {(hasSourceFilters || activeType !== "All") && (
             <button className="text-button" onClick={clearSourceFilters}>
@@ -197,66 +182,18 @@ export function SourcesView({
           )}
         </div>
       </section>
-      {visibleSources.length ? (
-        paginatedSources.map((s) => (
-          <div className="card source-card" key={s.id}>
-            <button className="source-card-main" onClick={() => onSource(s)}>
-              <span className="source-type-icon">
-                <FileText size={18} />
-              </span>
-              <span>
-                <span className="source-kind">{s.type}</span>
-                <h3>{s.title}</h3>
-                <span className="source-meta">
-                  {s.authors} · {s.organization} · {s.date}
-                </span>
-                <span className="desc">{s.description}</span>
-                {s.bibliographyAnnotation && (
-                  <span className="source-bibliography-preview">
-                    <BookOpen size={12} />
-                    {s.bibliographyAnnotation}
-                  </span>
-                )}
-                {s.tags.map((t) => (
-                  <span className="pill" key={t}>
-                    #{t}
-                  </span>
-                ))}
-              </span>
-            </button>
-            <div className="source-actions">
-              <button
-                className="icon-btn"
-                title="Edit source"
-                onClick={() => onEdit(s)}
-              >
-                <Pencil size={15} />
-              </button>
-              <button
-                className="icon-btn"
-                title="Copy APA citation"
-                onClick={() => onCopy(s)}
-              >
-                <Copy size={15} />
-              </button>
-              <a
-                className="icon-btn"
-                href={s.url}
-                target="_blank"
-                rel="noreferrer"
-                title="Open original"
-              >
-                <ExternalLink size={15} />
-              </a>
-              <button
-                className="icon-btn danger"
-                title="Delete"
-                onClick={() => onDelete(s.id)}
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          </div>
+      {pageError && <div className="analysis-error collection-error" role="alert">{pageError} <button className="text-button" onClick={() => setRetry((value) => value + 1)}>Retry</button></div>}
+      {showInitialLoading && <div className="collection-skeleton" role="status" aria-label="Loading sources"><span/><span/><span/></div>}
+      {!showInitialLoading && (paginatedSources.length ? (
+        paginatedSources.map((source) => (
+          <SourceTile
+            key={source.id}
+            source={source}
+            onOpen={onSource}
+            onEdit={onEdit}
+            onCopy={onCopy}
+            onDelete={(item) => onDelete(item.id)}
+          />
         ))
       ) : (
         <div className="card empty">
@@ -274,8 +211,8 @@ export function SourcesView({
             </button>
           )}
         </div>
-      )}
-      {visibleSources.length > pageSize && (
+      ))}
+      {pageCount > 1 && (
         <PaginationControls
           page={page}
           pageCount={pageCount}

@@ -1,4 +1,4 @@
-import { SourceType } from "@/lib/generated/prisma/enums";
+import { SourceStorageMode, SourceType } from "@/lib/generated/prisma/enums";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { apiError } from "@/lib/api/responses";
@@ -7,6 +7,8 @@ import { researchService } from "@/lib/services/research-service";
 import { sourcePatchSchema } from "@/lib/api/schemas";
 import { parseJson, parseResourceId } from "@/lib/api/validation";
 import { normalizeReviewedCitation } from "@/lib/citations/normalized";
+import { citationPersistenceData } from "@/lib/citations/persistence";
+import { finalizeReviewedProvenance } from "@/lib/metadata/provenance";
 
 export async function DELETE(
   request: NextRequest,
@@ -43,6 +45,12 @@ export async function PATCH(
         },
       );
     } else if ("title" in body) {
+      const citation = normalizeReviewedCitation(body);
+      const review = finalizeReviewedProvenance(
+        citation,
+        body.metadataProvenance,
+        body.reviewedFields,
+      );
       row = await researchService.sources.update(user.id, id, {
         title: body.title,
         authors: body.authors || undefined,
@@ -54,10 +62,17 @@ export async function PATCH(
               body.type ?? "Article",
             ).toUpperCase() as keyof typeof SourceType
           ] ?? SourceType.ARTICLE,
-        url: body.url,
+        url: body.url || undefined,
+        storageMode: body.storageMode ? SourceStorageMode[body.storageMode] : undefined,
+        localFile: body.localFile
+          ? { ...body.localFile, fileSize: BigInt(body.localFile.fileSize) }
+          : body.localFile,
         canonicalUrl: body.canonicalUrl || undefined,
         doi: body.doi || undefined,
-        citationMetadata: normalizeReviewedCitation(body),
+        ...citationPersistenceData(citation, review.provenance, {
+          preserveCitationUrl: body.storageMode === "LOCAL",
+        }),
+        metadataNeedsReview: review.metadataNeedsReview,
         description: body.description || undefined,
         bibliographyAnnotation: body.bibliographyAnnotation || undefined,
         notes: body.notes || undefined,

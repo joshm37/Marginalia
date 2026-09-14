@@ -22,6 +22,18 @@ enum CaptureMethod {
   IMPORT
 }
 
+enum SourceStorageMode {
+  WEB
+  LOCAL
+  ARCHIVED
+}
+
+enum ContributorRole {
+  AUTHOR
+  EDITOR
+  TRANSLATOR
+}
+
 enum ExcerptType {
   EVIDENCE
   SUMMARY
@@ -31,49 +43,113 @@ enum ExcerptType {
 }
 
 model User {
-  id          String    @id
-  email       String    @unique
-  displayName String?
-  sources     Source[]
-  projects    Project[]
-  tags        Tag[]
-  excerpts    Excerpt[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String        @id
+  email        String        @unique
+  displayName  String?
+  sources      Source[]
+  projects     Project[]
+  tags         Tag[]
+  excerpts     Excerpt[]
+  contributors Contributor[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }
 
 model Source {
-  id                     String          @id @default(cuid())
+  id                     String              @id @default(cuid())
   userId                 String
-  user                   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   title                  String
   authors                String?
   organization           String?
   publicationDate        DateTime?
   sourceType             SourceType
-  url                    String
+  url                    String?
   canonicalUrl           String?
-  normalizedUrl          String
+  normalizedUrl          String?
   doi                    String?
   description            String?
   bibliographyAnnotation String?
-  includeInBibliography  Boolean         @default(true)
+  includeInBibliography  Boolean             @default(true)
   notes                  String?
   citationMetadata       Json?
-  captureMethod          CaptureMethod   @default(MANUAL)
-  metadataNeedsReview    Boolean         @default(false)
+  containerTitle         String?
+  volume                 String?
+  issue                  String?
+  pages                  String?
+  publisher              String?
+  publisherPlace         String?
+  edition                String?
+  isbn                   String?
+  issn                   String?
+  accessedDate           DateTime?
+  language               String?
+  captureMethod          CaptureMethod       @default(MANUAL)
+  metadataNeedsReview    Boolean             @default(false)
   fileUrl                String?
+  storageMode            SourceStorageMode   @default(WEB)
+  localFile              LocalFileReference?
   projects               ProjectSource[]
   tags                   SourceTag[]
   excerpts               Excerpt[]
-  createdAt              DateTime        @default(now())
-  updatedAt              DateTime        @updatedAt
+  contributors           SourceContributor[]
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 
   @@unique([userId, doi])
   @@unique([userId, canonicalUrl])
   @@unique([userId, normalizedUrl])
+  @@unique([id, userId])
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, sourceType])
+  @@index([userId, containerTitle])
+}
+
+model LocalFileReference {
+  sourceId     String   @unique
+  userId       String
+  sha256       String   @db.Char(64)
+  filename     String
+  fileSize     BigInt
+  mimeType     String
+  lastModified DateTime?
+  source       Source   @relation(fields: [sourceId, userId], references: [id, userId], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@id([sourceId, userId])
+  @@unique([userId, sha256])
+  @@index([sha256])
+}
+
+model Contributor {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  given     String?
+  family    String?
+  literal   String?
+  suffix    String?
+  isLegacy  Boolean             @default(false)
+  sources   SourceContributor[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([userId, family, given])
+  @@index([userId, literal])
+}
+
+model SourceContributor {
+  sourceId      String
+  contributorId String
+  role          ContributorRole
+  sequence      Int
+  source        Source          @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  contributor   Contributor     @relation(fields: [contributorId], references: [id], onDelete: Cascade)
+
+  @@id([sourceId, contributorId, role])
+  @@unique([sourceId, role, sequence])
+  @@index([contributorId])
 }
 
 model Project {
@@ -119,7 +195,7 @@ model Excerpt {
   selectedText    String
   surroundingText String?
   note            String?
-  pageUrl         String
+  pageUrl         String?
   excerptType     ExcerptType
   locationData    Json?
   projects        ExcerptProject[]

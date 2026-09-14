@@ -24,12 +24,11 @@ export async function POST(request: NextRequest) {
       tags: body.source.tags ?? [],
       createdAt: body.source.createdAt ?? "",
     } as Source;
-    return NextResponse.json({
-      citation: citationEngine.formatBibliography(
-        sourceToNormalizedCitation(source),
-        body.style,
-      ),
-    });
+    const citation = await citationEngine.format(
+      sourceToNormalizedCitation(source),
+      body.style,
+    );
+    return NextResponse.json({ citation: citation.text, html: citation.html });
   } catch (error) {
     return apiError(error, request);
   }

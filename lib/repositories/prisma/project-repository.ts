@@ -44,20 +44,33 @@ export class PrismaProjectRepository implements ProjectRepository {
   }
 
   async deletePermanently(userId: string, projectId: string) {
+    const sourceFilter = {
+      userId,
+      projects: {
+        some: {
+          projectId,
+          project: { userId, deletedAt: null, isActive: false },
+        },
+      },
+    } as const;
+    const sourceContributors = await prisma.sourceContributor.findMany({
+      where: { source: sourceFilter },
+      select: { contributorId: true },
+    });
     const [, result] = await prisma.$transaction([
       prisma.source.deleteMany({
-        where: {
-          userId,
-          projects: {
-            some: {
-              projectId,
-              project: { userId, deletedAt: null, isActive: false },
-            },
-          },
-        },
+        where: sourceFilter,
       }),
       prisma.project.deleteMany({
         where: { id: projectId, userId, deletedAt: null, isActive: false },
+      }),
+      prisma.contributor.deleteMany({
+        where: {
+          userId,
+          id: {
+            in: sourceContributors.map((item) => item.contributorId),
+          },
+        },
       }),
     ]);
     return result.count > 0;

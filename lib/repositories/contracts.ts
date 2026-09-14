@@ -1,6 +1,7 @@
 import type {
   ExcerptType,
   CaptureMethod,
+  SourceStorageMode,
   SourceType,
 } from "@/lib/generated/prisma/enums";
 
@@ -10,7 +11,7 @@ export type CreateSourceInput = {
   organization?: string;
   publicationDate?: Date;
   sourceType: SourceType;
-  url: string;
+  url?: string;
   canonicalUrl?: string;
   doi?: string;
   description?: string;
@@ -18,6 +19,34 @@ export type CreateSourceInput = {
   notes?: string;
   captureMethod?: CaptureMethod;
   citationMetadata?: Record<string, unknown>;
+  metadataNeedsReview?: boolean;
+  contributors?: Array<{
+    role: "AUTHOR" | "EDITOR" | "TRANSLATOR";
+    sequence: number;
+    given?: string;
+    family?: string;
+    literal?: string;
+    suffix?: string;
+  }>;
+  containerTitle?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publisher?: string;
+  publisherPlace?: string;
+  edition?: string;
+  isbn?: string;
+  issn?: string;
+  accessedDate?: Date;
+  language?: string;
+  storageMode?: SourceStorageMode;
+  localFile?: {
+    sha256: string;
+    filename: string;
+    fileSize: bigint;
+    mimeType: string;
+    lastModified?: Date;
+  };
   projectIds?: string[];
   tagNames?: string[];
 };
@@ -33,7 +62,7 @@ export type CreateExcerptInput = {
   selectedText: string;
   surroundingText?: string;
   note?: string;
-  pageUrl: string;
+  pageUrl?: string;
   excerptType: ExcerptType;
   locationData?: Record<string, unknown>;
   projectIds?: string[];
@@ -44,16 +73,16 @@ export interface SourceRepository {
   list(userId: string): Promise<unknown[]>;
   listPage(
     userId: string,
-    pagination: { skip: number; take: number },
+    pagination: { skip: number; take: number; q?: string; type?: string; projectId?: string; tag?: string; reviewOnly?: boolean; sort?: string },
   ): Promise<{ rows: unknown[]; total: number }>;
   findDuplicate(
     userId: string,
-    values: { doi?: string; canonicalUrl?: string; normalizedUrl: string },
+    values: { doi?: string; canonicalUrl?: string; normalizedUrl?: string; localFileHash?: string },
   ): Promise<unknown | null>;
   create(
     userId: string,
     input: CreateSourceInput & {
-      normalizedUrl: string;
+      normalizedUrl?: string;
       normalizedDoi?: string;
     },
   ): Promise<unknown>;
@@ -70,7 +99,7 @@ export interface SourceRepository {
   update(
     userId: string,
     sourceId: string,
-    input: CreateSourceInput & { normalizedUrl: string },
+    input: CreateSourceInput & { normalizedUrl?: string },
   ): Promise<unknown | null>;
   delete(userId: string, sourceId: string): Promise<boolean>;
 }
@@ -94,7 +123,7 @@ export interface ExcerptRepository {
   list(userId: string): Promise<unknown[]>;
   listPage(
     userId: string,
-    pagination: { skip: number; take: number },
+    pagination: { skip: number; take: number; q?: string; sourceId?: string; projectId?: string; tag?: string; type?: string; sort?: string },
   ): Promise<{ rows: unknown[]; total: number }>;
   create(userId: string, input: CreateExcerptInput): Promise<unknown>;
   update(

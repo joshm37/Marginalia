@@ -62,6 +62,54 @@ test("captures a source from an analyzed link", async ({ page, request }) => {
   await expect(page.getByText(`Captured source ${id}`).first()).toBeVisible();
 });
 
+test("saves a selected local PDF without sending or persisting a file URL", async ({ page, request }) => {
+  const id = suffix();
+  const project = await createProject(request, `Local PDF project ${id}`);
+  await signIn(page);
+  const pdf = await page.pdf({ format: "Letter" });
+  let outgoing: Record<string, unknown> | undefined;
+  await page.route("**/api/sources", async (route) => {
+    if (route.request().method() === "POST")
+      outgoing = route.request().postDataJSON() as Record<string, unknown>;
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "Save a source" }).click();
+  await page.getByRole("button", { name: "Add local PDF" }).click();
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Choose PDF" }).click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({
+    name: "example.pdf",
+    mimeType: "application/pdf",
+    buffer: pdf,
+  });
+  await expect(page.getByRole("heading", { name: "New source" })).toBeVisible();
+  const savedTitle = `Local PDF ${id}`;
+  await page.locator(".modal .field").filter({ hasText: "TITLE" }).locator("input").fill(savedTitle);
+  const projectField = page.locator(".modal .field").filter({ hasText: "PROJECT" });
+  await projectField.locator("select").selectOption(project.id);
+  await page.getByRole("button", { name: "Save source" }).click();
+  await expect(page.getByText(savedTitle).first()).toBeVisible();
+
+  expect(outgoing).toMatchObject({ storageMode: "LOCAL" });
+  expect(outgoing?.url).toBeUndefined();
+  expect(JSON.stringify(outgoing)).not.toContain("file:");
+  expect(JSON.stringify(outgoing)).not.toContain("/Users/");
+
+  const response = await request.get("/api/sources");
+  expect(response.ok()).toBeTruthy();
+  const sources = await response.json() as Array<Record<string, unknown>>;
+  const saved = sources.find((source) => source.title === savedTitle);
+  expect(saved).toMatchObject({
+    storageMode: "LOCAL",
+    localFile: { filename: "example.pdf" },
+  });
+  expect(saved?.url).toBeUndefined();
+  expect(JSON.stringify(saved)).not.toContain("file:");
+  expect(JSON.stringify(saved)).not.toContain("/Users/");
+});
+
 test("edits an existing excerpt", async ({ page, request }) => {
   const id = suffix();
   const project = await createProject(request, `Excerpt project ${id}`);

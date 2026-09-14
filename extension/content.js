@@ -22,25 +22,29 @@ function dashboardTheme() {
   return null;
 }
 
-function syncDashboardTheme() {
+async function syncDashboardTheme() {
   const theme = dashboardTheme();
-  if (theme)
-    chrome.runtime
-      .sendMessage({ type: "set-popup-theme", theme })
-      .catch(() => undefined);
+  if (!theme) return;
+  try {
+    await chrome.runtime.sendMessage({ type: "set-popup-theme", theme });
+  } catch {}
 }
 
 async function popupTheme() {
   const localTheme = dashboardTheme();
   if (localTheme) {
-    chrome.runtime
-      .sendMessage({ type: "set-popup-theme", theme: localTheme })
-      .catch(() => undefined);
+    try {
+      await chrome.runtime.sendMessage({
+        type: "set-popup-theme",
+        theme: localTheme,
+      });
+    } catch {}
     return localTheme;
   }
-  const saved = await chrome.runtime
-    .sendMessage({ type: "get-popup-theme" })
-    .catch(() => null);
+  let saved = null;
+  try {
+    saved = await chrome.runtime.sendMessage({ type: "get-popup-theme" });
+  } catch {}
   if (saved?.theme === "dark" || saved?.theme === "light") return saved.theme;
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
@@ -118,12 +122,17 @@ async function showPopup(selection) {
     (captured.selectedText === lastSelection && marginaliaHost)
   )
     return;
-  const [response, theme] = await Promise.all([
-    chrome.runtime
-      .sendMessage({ type: "annotation-context", url: location.href })
-      .catch((error) => ({ error: error.message })),
-    popupTheme(),
-  ]);
+  const contextRequest = async () => {
+    try {
+      return await chrome.runtime.sendMessage({
+        type: "annotation-context",
+        url: location.href,
+      });
+    } catch (error) {
+      return { error: error.message };
+    }
+  };
+  const [response, theme] = await Promise.all([contextRequest(), popupTheme()]);
   const currentSelection = window.getSelection()?.toString().trim();
   if (isPointerSelecting || currentSelection !== captured.selectedText) return;
   if (!response?.context) {
@@ -234,10 +243,13 @@ async function showPopup(selection) {
       renderTags();
     }
   };
-  chrome.runtime.sendMessage({ type: "list-tags" }).then((result) => {
-    tagOptions = result?.tags || [];
-    renderTags();
-  });
+  (async () => {
+    try {
+      const result = await chrome.runtime.sendMessage({ type: "list-tags" });
+      tagOptions = result?.tags || [];
+      renderTags();
+    } catch {}
+  })();
   const pageLabel = document.createElement("label");
   pageLabel.className = "page-field";
   pageLabel.textContent = "Page";

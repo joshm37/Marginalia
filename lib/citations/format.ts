@@ -6,7 +6,7 @@ import type { Source } from "@/lib/types";
 
 export type { CitationStyle } from "@/lib/citations/types";
 
-export function formatCitation(source: Source, style: CitationStyle) {
+export async function formatCitation(source: Source, style: CitationStyle) {
   return citationEngine.formatBibliography(
     sourceToNormalizedCitation(source),
     style,

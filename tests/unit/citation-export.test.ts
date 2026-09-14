@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sourcesToBibtex, sourcesToRis } from "@/lib/citations/export";
+import { sourcesToBibtex, sourcesToCslJson, sourcesToRis } from "@/lib/citations/export";
 import type { Source } from "@/lib/types";
 
 const source: Source = {
@@ -40,5 +40,12 @@ describe("citation exchange exports", () => {
     expect(result).toContain("DO  - 10.1000/example");
     expect(result).toContain("N1  - A concise assessment of the evidence.");
     expect(result).toContain("ER  - ");
+  });
+
+  it("exports structured CSL-JSON without parsing a display citation", () => {
+    const result = JSON.parse(sourcesToCslJson([source]));
+    expect(result[0]).toMatchObject({ id: "source-1", type: "article-journal", DOI: "10.1000/example" });
+    expect(result[0].author[0]).toEqual({ family: "Doe", given: "Jane" });
+    expect(result[0].author[1]).toEqual({ literal: "Example Institute" });
   });
 });

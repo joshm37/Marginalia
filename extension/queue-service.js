@@ -1,9 +1,16 @@
 const QUEUE_KEY = "marginaliaRequestQueue";
 const MAX_ATTEMPTS = 6;
+let processing = null;
+
+function fingerprint(kind, payload) {
+  return `${kind}:${JSON.stringify(payload)}`;
+}
 
 export async function enqueueRequest(kind, payload) {
   const stored = await chrome.storage.local.get(QUEUE_KEY);
   const queue = stored[QUEUE_KEY] || [];
+  const existing = queue.find((entry) => entry.fingerprint === fingerprint(kind, payload));
+  if (existing) return existing;
   const item = {
     id: crypto.randomUUID(),
     kind,
@@ -11,12 +18,19 @@ export async function enqueueRequest(kind, payload) {
     attempts: 0,
     createdAt: Date.now(),
     nextAttemptAt: Date.now(),
+    fingerprint: fingerprint(kind, payload),
   };
   await chrome.storage.local.set({ [QUEUE_KEY]: [...queue, item] });
   return item;
 }
 
 export async function processQueue(send) {
+  if (processing) return processing;
+  processing = processQueueOnce(send).finally(() => { processing = null; });
+  return processing;
+}
+
+async function processQueueOnce(send) {
   const stored = await chrome.storage.local.get(QUEUE_KEY);
   const queue = stored[QUEUE_KEY] || [];
   const remaining = [];

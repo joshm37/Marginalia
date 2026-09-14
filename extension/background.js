@@ -32,14 +32,13 @@ async function protectSessionStorage() {
 }
 chrome.runtime.onInstalled.addListener(async () => {
   await protectSessionStorage();
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({
-      id: "marginalia-capture-selection",
-      title: "Save selection to Marginalia",
-      contexts: ["selection"],
-    });
+  await chrome.contextMenus.removeAll();
+  await chrome.contextMenus.create({
+    id: "marginalia-capture-selection",
+    title: "Save selection to Marginalia",
+    contexts: ["selection"],
   });
-  chrome.alarms.create("marginalia-retry-queue", { periodInMinutes: 1 });
+  await chrome.alarms.create("marginalia-retry-queue", { periodInMinutes: 1 });
 });
 chrome.runtime.onStartup.addListener(protectSessionStorage);
 protectSessionStorage();
@@ -50,9 +49,11 @@ async function sendQueued(item) {
   throw Object.assign(new Error("Unknown queued request"), { retryable: false });
 }
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "marginalia-retry-queue")
-    processQueue(sendQueued).catch(() => undefined);
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== "marginalia-retry-queue") return;
+  try {
+    await processQueue(sendQueued);
+  } catch {}
 });
 
 async function requestSelectionCapture(tab, selectionText) {
@@ -67,14 +68,20 @@ async function requestSelectionCapture(tab, selectionText) {
       },
     });
   } else {
-    await chrome.tabs.sendMessage(tab.id, { type: "capture-current-selection" }).catch(() => undefined);
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: "capture-current-selection" });
+    } catch {}
   }
-  await chrome.action.openPopup().catch(() => undefined);
+  try {
+    await chrome.action.openPopup();
+  } catch {}
 }
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === "marginalia-capture-selection")
-    requestSelectionCapture(tab, info.selectionText).catch(() => undefined);
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== "marginalia-capture-selection") return;
+  try {
+    await requestSelectionCapture(tab, info.selectionText);
+  } catch {}
 });
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== "capture-selection") return;
@@ -83,90 +90,95 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === "set-popup-theme") {
-    if (message.theme === "dark" || message.theme === "light") {
-      chrome.storage.local
-        .set({ [THEME_KEY]: message.theme })
-        .then(() => sendResponse({ ok: true }))
-        .catch((error) => sendResponse({ error: error.message }));
-      return true;
-    }
-    sendResponse({ error: "Invalid theme" });
-    return;
-  }
-  if (message.type === "get-popup-theme") {
-    chrome.storage.local
-      .get(THEME_KEY)
-      .then((data) => sendResponse({ theme: data[THEME_KEY] || null }))
-      .catch((error) => sendResponse({ error: error.message }));
-    return true;
-  }
-  if (message.type === "annotation-context") {
-    (async () => {
-      const key = normalizeUrl(message.url),
-        data = await chrome.storage.local.get(SOURCES_KEY),
-        existing = data[SOURCES_KEY]?.[key];
-      if (existing) return existing;
-      const duplicate = await checkDuplicate({ url: message.url });
-      if (!duplicate.duplicate || !duplicate.source) return null;
-      const projects = await getProjects(),
-        projectId = duplicate.source.projects?.[0],
-        project = projects.find((item) => item.id === projectId);
-      if (!projectId) return null;
-      const context = {
-        sourceId: duplicate.source.id,
-        sourceTitle: duplicate.source.title,
-        projectId,
-        projectName: project?.name || "Project",
-      };
-      await chrome.storage.local.set({
-        [SOURCES_KEY]: { ...(data[SOURCES_KEY] || {}), [key]: context },
-      });
-      return context;
-    })()
-      .then((context) => sendResponse({ context }))
-      .catch((error) => sendResponse({ error: error.message }));
-    return true;
-  }
-  if (message.type === "save-annotation") {
-    saveAnnotation(message.annotation)
-      .then((annotation) => {
+  (async () => {
+    try {
+      if (message.type === "set-popup-theme") {
+        if (message.theme !== "dark" && message.theme !== "light") {
+          sendResponse({ error: "Invalid theme" });
+          return;
+        }
+        await chrome.storage.local.set({ [THEME_KEY]: message.theme });
+        sendResponse({ ok: true });
+        return;
+      }
+      if (message.type === "get-popup-theme") {
+        const data = await chrome.storage.local.get(THEME_KEY);
+        sendResponse({ theme: data[THEME_KEY] || null });
+        return;
+      }
+      if (message.type === "annotation-context") {
+        const key = normalizeUrl(message.url);
+        const data = await chrome.storage.local.get(SOURCES_KEY);
+        const existing = data[SOURCES_KEY]?.[key];
+        if (existing) {
+          sendResponse({ context: existing });
+          return;
+        }
+        const duplicate = await checkDuplicate({ url: message.url });
+        if (!duplicate.duplicate || !duplicate.source) {
+          sendResponse({ context: null });
+          return;
+        }
+        const projects = await getProjects();
+        const projectId = duplicate.source.projects?.[0];
+        const project = projects.find((item) => item.id === projectId);
+        if (!projectId) {
+          sendResponse({ context: null });
+          return;
+        }
+        const context = {
+          sourceId: duplicate.source.id,
+          sourceTitle: duplicate.source.title,
+          projectId,
+          projectName: project?.name || "Project",
+        };
+        await chrome.storage.local.set({
+          [SOURCES_KEY]: { ...(data[SOURCES_KEY] || {}), [key]: context },
+        });
+        sendResponse({ context });
+        return;
+      }
+      if (message.type === "save-annotation") {
+        try {
+          const annotation = await saveAnnotation(message.annotation);
+          invalidateTagCache();
+          sendResponse({ annotation });
+        } catch (error) {
+          if (error.retryable) {
+            await enqueueRequest("excerpt", message.annotation);
+            sendResponse({ queued: true, message: "Saved to your retry queue. Marginalia will upload it when the connection returns." });
+          } else sendResponse({ error: error.message, code: error.code });
+        }
+        return;
+      }
+      if (message.type === "save-source") {
+        try {
+          const source = await saveSource(message.source);
+          sendResponse({ source });
+        } catch (error) {
+          if (error.retryable) {
+            await enqueueRequest("source", message.source);
+            sendResponse({ queued: true, message: "Saved to your retry queue. Marginalia will upload it when the connection returns." });
+          } else sendResponse({ error: error.message, code: error.code });
+        }
+        return;
+      }
+      if (message.type === "queue-status") {
+        try { await processQueue(sendQueued); } catch {}
+        sendResponse({ count: await queueCount() });
+        return;
+      }
+      if (message.type === "list-tags") {
+        sendResponse({ tags: await getCachedTags() });
+        return;
+      }
+      if (message.type === "invalidate-tags") {
         invalidateTagCache();
-        sendResponse({ annotation });
-      })
-      .catch(async (error) => {
-        if (error.retryable) {
-          await enqueueRequest("excerpt", message.annotation);
-          sendResponse({ queued: true, message: "Saved to your retry queue. Marginalia will upload it when the connection returns." });
-        } else sendResponse({ error: error.message, code: error.code });
-      });
-    return true;
-  }
-  if (message.type === "save-source") {
-    saveSource(message.source)
-      .then((source) => sendResponse({ source }))
-      .catch(async (error) => {
-        if (error.retryable) {
-          await enqueueRequest("source", message.source);
-          sendResponse({ queued: true, message: "Saved to your retry queue. Marginalia will upload it when the connection returns." });
-        } else sendResponse({ error: error.message, code: error.code });
-      });
-    return true;
-  }
-  if (message.type === "queue-status") {
-    queueCount()
-      .then((count) => sendResponse({ count }))
-      .catch((error) => sendResponse({ error: error.message }));
-    return true;
-  }
-  if (message.type === "list-tags") {
-    getCachedTags()
-      .then((tags) => sendResponse({ tags }))
-      .catch((error) => sendResponse({ error: error.message }));
-    return true;
-  }
-  if (message.type === "invalidate-tags") {
-    invalidateTagCache();
-    sendResponse({ ok: true });
-  }
+        sendResponse({ ok: true });
+      }
+    } catch (error) {
+      sendResponse({ error: error instanceof Error ? error.message : "Extension request failed" });
+    }
+  })();
+  return true;
 });

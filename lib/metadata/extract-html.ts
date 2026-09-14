@@ -11,8 +11,14 @@ import type {
 } from "@/lib/citations/types";
 import type {
   ExtractionDiagnostics,
+  MetadataConfidence,
+  MetadataProvider,
   ResolvedSourceMetadata,
 } from "@/lib/metadata/types";
+import {
+  needsMetadataReview,
+  provenanceValue,
+} from "@/lib/metadata/provenance";
 
 type JsonLd = Record<string, unknown>;
 
@@ -111,6 +117,24 @@ export function extractHtmlMetadataWithDiagnostics(
     names.flatMap((name) => metadata.get(name.toLowerCase()) ?? [])[0] ?? "";
   const all = (...names: string[]) =>
     names.flatMap((name) => metadata.get(name.toLowerCase()) ?? []);
+  const providerFor = (...names: string[]): MetadataProvider | undefined => {
+    const key = names.find((name) => metadata.has(name.toLowerCase()));
+    if (!key) return undefined;
+    const normalized = key.toLowerCase();
+    if (normalized.startsWith("citation_")) return "HTML_CITATION_META";
+    if (normalized.startsWith("dc.") || normalized.startsWith("dcterms."))
+      return "DUBLIN_CORE";
+    if (normalized.startsWith("prism.")) return "PRISM";
+    if (normalized.startsWith("og:") || normalized.startsWith("article:"))
+      return "OPEN_GRAPH";
+    return "HTML_GENERIC";
+  };
+  const confidenceFor = (provider?: MetadataProvider): MetadataConfidence =>
+    provider === "HTML_CITATION_META" || provider === "PRISM"
+      ? "HIGH"
+      : provider === "JSON_LD" || provider === "DUBLIN_CORE"
+        ? "MEDIUM"
+        : "LOW";
 
   const structuredItems: JsonLd[] = [];
   $('script[type="application/ld+json" i]').each((_index, element) => {
@@ -265,7 +289,77 @@ export function extractHtmlMetadataWithDiagnostics(
     issue: citationData.issue,
     pages,
     citationData,
+    provenance: {},
+    metadataNeedsReview: false,
   };
+  const authorsProvider = all("citation_author").length
+    ? "HTML_CITATION_META"
+    : structuredAuthors.length
+      ? "JSON_LD"
+      : all("dc.creator", "dc.contributor.author").length
+        ? "DUBLIN_CORE"
+        : "HTML_GENERIC";
+  const titleProvider =
+    providerFor("citation_title", "dc.title", "og:title", "twitter:title") ||
+    (structured.headline || structured.name ? "JSON_LD" : "HTML_GENERIC");
+  const dateProvider = structured.datePublished
+    ? "JSON_LD"
+    : providerFor(
+        "citation_publication_date",
+        "citation_online_date",
+        "citation_date",
+        "article:published_time",
+        "dc.date",
+        "datepublished",
+        "date",
+      ) || (structured.dateCreated ? "JSON_LD" : undefined);
+  const containerProvider = providerFor(
+    "citation_journal_title",
+    "citation_conference_title",
+  ) || (containerTitle ? "JSON_LD" : undefined);
+  const publisherProvider = structured.publisher
+    ? "JSON_LD"
+    : providerFor(
+        "citation_publisher",
+        "dc.publisher",
+        "og:site_name",
+        "application-name",
+      );
+  const set = (
+    field: keyof typeof result.provenance,
+    value: unknown,
+    provider?: MetadataProvider,
+  ) => {
+    if (value === undefined || value === "" || (Array.isArray(value) && !value.length))
+      return;
+    const selectedProvider = provider ?? "HTML_GENERIC";
+    result.provenance[field] = provenanceValue(
+      value,
+      selectedProvider,
+      confidenceFor(selectedProvider),
+    );
+  };
+  set("title", title, titleProvider);
+  set("authors", citationData.authors, authorsProvider);
+  set("editors", citationData.editors, structured.editor ? "JSON_LD" : undefined);
+  set("translators", citationData.translators, structured.translator ? "JSON_LD" : undefined);
+  set("publisher", organization, publisherProvider);
+  set("publicationDate", date, dateProvider);
+  set("accessedDate", citationData.accessed, "URL_INFERENCE");
+  set("containerTitle", containerTitle, containerProvider);
+  set("volume", citationData.volume, providerFor("citation_volume", "prism.volume") || (structured.volumeNumber ? "JSON_LD" : undefined));
+  set("issue", citationData.issue, providerFor("citation_issue", "prism.number") || (structured.issueNumber ? "JSON_LD" : undefined));
+  set("pages", pages, providerFor("citation_firstpage", "prism.startingpage", "citation_pages") || (structured.pagination ? "JSON_LD" : undefined));
+  set("edition", citationData.edition, providerFor("citation_edition") || (structured.bookEdition ? "JSON_LD" : undefined));
+  set("publisherPlace", citationData.publisherPlace, providerFor("citation_publisher_place"));
+  set("doi", doi, providerFor("citation_doi", "dc.identifier", "dc.identifier.doi", "prism.doi") || (structured.identifier ? "JSON_LD" : "URL_INFERENCE"));
+  set("isbn", citationData.isbn, providerFor("citation_isbn") || (structured.isbn ? "JSON_LD" : undefined));
+  set("issn", citationData.issn, providerFor("citation_issn", "prism.issn") || (structured.issn ? "JSON_LD" : undefined));
+  set("language", citationData.language, providerFor("citation_language", "dc.language") || (structured.inLanguage ? "JSON_LD" : undefined));
+  set("description", citationData.abstract, providerFor("dc.description", "og:description", "description") || (structured.description ? "JSON_LD" : undefined));
+  set("url", canonicalUrl, canonicalRaw ? "HTML_GENERIC" : "URL_INFERENCE");
+  set("sourceType", sourceType, structuredType ? "JSON_LD" : containerTitle ? "HTML_CITATION_META" : "URL_INFERENCE");
+  result.metadataNeedsReview = needsMetadataReview(result.provenance);
   const keys = [...metadata.keys()];
   return {
     metadata: result,

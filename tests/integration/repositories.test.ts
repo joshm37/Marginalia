@@ -11,6 +11,7 @@ import {
 import {
   CaptureMethod,
   ExcerptType,
+  SourceStorageMode,
   SourceType,
 } from "@/lib/generated/prisma/enums";
 
@@ -62,6 +63,47 @@ suite("PostgreSQL repositories", () => {
     await expect(sources.list(users.b)).resolves.toHaveLength(0);
   });
 
+  it("rejects cross-user source, excerpt, and project mutations", async () => {
+    const foreignSource = (await sources.create(users.b, {
+      title: "Foreign source",
+      url: `https://example.test/${runId}/foreign-source`,
+      sourceType: SourceType.ARTICLE,
+      projectIds: [projectB.id],
+    })) as { id: string };
+    const foreignExcerpt = (await excerpts.create(users.b, {
+      sourceId: foreignSource.id,
+      selectedText: "Foreign evidence",
+      pageUrl: `https://example.test/${runId}/foreign-source`,
+      excerptType: ExcerptType.EVIDENCE,
+      projectIds: [projectB.id],
+    })) as { id: string };
+
+    await expect(sourceRepository.delete(users.a, foreignSource.id)).resolves.toBe(false);
+    await expect(excerpts.delete(users.a, foreignExcerpt.id)).resolves.toBe(false);
+    await expect(
+      excerpts.create(users.a, {
+        sourceId: foreignSource.id,
+        selectedText: "Attempted association",
+        pageUrl: `https://example.test/${runId}/foreign-source`,
+        excerptType: ExcerptType.NOTE,
+        projectIds: [projectA1.id],
+      }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(
+      sourceRepository.moveToProject(users.a, foreignSource.id, projectA1.id),
+    ).resolves.toBeNull();
+    await expect(
+      projects.updateState(users.a, projectB.id, { isActive: false }),
+    ).rejects.toMatchObject({ code: "P2025" });
+
+    await expect(
+      prisma.source.findUnique({ where: { id: foreignSource.id } }),
+    ).resolves.toMatchObject({ userId: users.b });
+    await expect(
+      prisma.excerpt.findUnique({ where: { id: foreignExcerpt.id } }),
+    ).resolves.toMatchObject({ userId: users.b });
+  });
+
   it("detects normalized duplicates and moves a source with its excerpts", async () => {
     const created = (await sources.create(users.a, {
       title: "Repository test source",
@@ -72,11 +114,26 @@ suite("PostgreSQL repositories", () => {
       projectIds: [projectA1.id],
       tagNames: ["Evidence"],
       citationMetadata: {
-        title: "Repository test source",
-        type: "article-journal",
-        authors: [{ given: "Ada", family: "Lovelace" }],
-        volume: "4",
+        provider: "integration-test",
+        provenance: {
+          title: {
+            value: "Repository test source",
+            provider: "CROSSREF",
+            confidence: "HIGH",
+            reviewed: false,
+          },
+        },
       },
+      metadataNeedsReview: true,
+      contributors: [
+        {
+          role: "AUTHOR",
+          sequence: 0,
+          given: "Ada",
+          family: "Lovelace",
+        },
+      ],
+      volume: "4",
     })) as { id: string };
 
     await expect(
@@ -101,10 +158,25 @@ suite("PostgreSQL repositories", () => {
 
     const persisted = await prisma.source.findUnique({
       where: { id: created.id },
+      include: {
+        contributors: {
+          include: { contributor: true },
+          orderBy: { sequence: "asc" },
+        },
+      },
     });
-    expect(persisted?.citationMetadata).toMatchObject({
-      authors: [{ given: "Ada", family: "Lovelace" }],
+    expect(persisted).toMatchObject({
       volume: "4",
+      metadataNeedsReview: true,
+      citationMetadata: {
+        provider: "integration-test",
+        provenance: { title: { provider: "CROSSREF" } },
+      },
+    });
+    expect(persisted?.contributors[0]).toMatchObject({
+      role: "AUTHOR",
+      sequence: 0,
+      contributor: { given: "Ada", family: "Lovelace" },
     });
 
     await expect(
@@ -121,6 +193,80 @@ suite("PostgreSQL repositories", () => {
     await expect(sources.list(users.b)).resolves.toHaveLength(0);
   });
 
+  it("stores local PDF identity per user and detects same-user duplicates", async () => {
+    const hash = "b".repeat(64);
+    const localInput = {
+      title: "Local PDF source",
+      sourceType: SourceType.ARTICLE,
+      storageMode: SourceStorageMode.LOCAL,
+      url: "file:///Users/test/Downloads/article.pdf",
+      canonicalUrl: "file:///Users/test/Downloads/article.pdf",
+      citationMetadata: {
+        originalUrl: "file:///Users/test/Downloads/article.pdf",
+        localPath: "/Users/test/Downloads/article.pdf",
+      },
+      localFile: {
+        sha256: hash,
+        filename: "article.pdf",
+        fileSize: BigInt(8192),
+        mimeType: "application/pdf",
+        lastModified: new Date("2026-09-13T12:00:00.000Z"),
+      },
+    };
+    const localA = (await sources.create(users.a, {
+      ...localInput,
+      projectIds: [projectA1.id],
+    })) as { id: string; localFile: { sha256: string; fileSize: bigint } };
+    expect(localA.localFile).toMatchObject({ sha256: hash, fileSize: BigInt(8192) });
+    const persistedLocal = await prisma.source.findUnique({ where: { id: localA.id } });
+    expect(persistedLocal).toMatchObject({
+      url: null,
+      canonicalUrl: null,
+      normalizedUrl: null,
+    });
+    expect(JSON.stringify(persistedLocal?.citationMetadata)).not.toContain("/Users/test");
+
+    await expect(sources.create(users.a, {
+      ...localInput,
+      title: "Duplicate local PDF",
+      projectIds: [projectA1.id],
+    })).rejects.toBeInstanceOf(DuplicateSourceError);
+
+    const localB = (await sources.create(users.b, {
+      ...localInput,
+      title: "Other user's copy",
+      projectIds: [projectB.id],
+    })) as { id: string };
+    expect(localB.id).not.toBe(localA.id);
+
+    const localExcerpt = (await excerpts.create(users.a, {
+      sourceId: localA.id,
+      selectedText: "Text extracted later on the user's device.",
+      excerptType: ExcerptType.EVIDENCE,
+      projectIds: [projectA1.id],
+      locationData: {
+        version: 1,
+        kind: "PDF_TEXT_QUOTE",
+        pageNumber: "7",
+        exact: "Text extracted later on the user's device.",
+        prefix: "Before ",
+        suffix: " After",
+      },
+    })) as { id: string };
+    await expect(prisma.excerpt.findUnique({ where: { id: localExcerpt.id } }))
+      .resolves.toMatchObject({
+        pageUrl: null,
+        userId: users.a,
+        locationData: expect.objectContaining({ pageNumber: "7", prefix: "Before ", suffix: " After" }),
+      });
+
+    await expect(sourceRepository.update(users.b, localA.id, {
+      ...localInput,
+      normalizedUrl: undefined,
+      projectIds: [projectB.id],
+    })).resolves.toBeNull();
+  });
+
   it("cascades source deletion to excerpts and project deletion to sources", async () => {
     const sourceDeleteProject = await projects.create(users.a, {
       name: `${runId}-source-delete`,
@@ -130,7 +276,18 @@ suite("PostgreSQL repositories", () => {
       url: `https://example.test/${runId}/source-cascade`,
       sourceType: SourceType.ARTICLE,
       projectIds: [sourceDeleteProject.id],
-    })) as { id: string };
+      contributors: [
+        {
+          role: "AUTHOR",
+          sequence: 0,
+          literal: "World Health Organization",
+        },
+      ],
+    })) as {
+      id: string;
+      contributors: Array<{ contributorId: string }>;
+    };
+    const deletedContributorId = directlyDeletedSource.contributors[0]?.contributorId;
     const directlyDeletedExcerpt = (await excerpts.create(users.a, {
       sourceId: directlyDeletedSource.id,
       selectedText: "This excerpt should be deleted with its source.",
@@ -141,6 +298,9 @@ suite("PostgreSQL repositories", () => {
     await sourceRepository.delete(users.a, directlyDeletedSource.id);
     await expect(
       prisma.excerpt.findUnique({ where: { id: directlyDeletedExcerpt.id } }),
+    ).resolves.toBeNull();
+    await expect(
+      prisma.contributor.findUnique({ where: { id: deletedContributorId } }),
     ).resolves.toBeNull();
 
     const cascadingProject = await projects.create(users.a, {
@@ -171,5 +331,38 @@ suite("PostgreSQL repositories", () => {
     await expect(
       prisma.excerpt.findUnique({ where: { id: cascadingExcerpt.id } }),
     ).resolves.toBeNull();
+  });
+
+  it("paginates and filters sources and excerpts in PostgreSQL", async () => {
+    const project = await projects.create(users.a, { name: `${runId}-pagination` });
+    const source = (await sources.create(users.a, {
+      title: `Unique searchable title ${runId}`,
+      url: `https://example.test/${runId}/pagination`,
+      sourceType: SourceType.REPORT,
+      projectIds: [project.id],
+      tagNames: ["pagination-tag"],
+    })) as { id: string };
+    await excerpts.create(users.a, {
+      sourceId: source.id,
+      selectedText: `Unique searchable excerpt ${runId}`,
+      pageUrl: `https://example.test/${runId}/pagination`,
+      excerptType: ExcerptType.EVIDENCE,
+      projectIds: [project.id],
+      tagNames: ["pagination-tag"],
+    });
+
+    const sourcePage = await sourceRepository.listPage(users.a, {
+      skip: 0, take: 1, q: `searchable title ${runId}`, projectId: project.id,
+      tag: "pagination-tag", type: "Report",
+    });
+    expect(sourcePage.total).toBe(1);
+    expect(sourcePage.rows).toHaveLength(1);
+
+    const excerptPage = await excerpts.listPage(users.a, {
+      skip: 0, take: 1, q: `searchable excerpt ${runId}`, sourceId: source.id,
+      projectId: project.id, tag: "pagination-tag", type: "Evidence",
+    });
+    expect(excerptPage.total).toBe(1);
+    expect(excerptPage.rows).toHaveLength(1);
   });
 });

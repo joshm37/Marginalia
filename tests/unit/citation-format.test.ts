@@ -8,6 +8,7 @@ import {
   sourceToNormalizedCitation,
 } from "@/lib/citations/normalized";
 import type { Source } from "@/lib/types";
+import { citationStyles } from "@/lib/citations/style-registry";
 
 const source: Source = {
   id: "source-1",
@@ -92,20 +93,59 @@ describe("Citation.js CSL formatting", () => {
   const engine = new CitationJsEngine();
   it.each([
     [
-      "APA",
+      "apa-7",
       "Lovelace, A., & Turing, A. (2026). The Shape of Evidence. Journal of Reliable Research, 12(3), 41–59. https://doi.org/10.1234/evidence",
     ],
     [
-      "MLA",
+      "mla-9",
       "Lovelace, Ada, and Alan Turing. “The Shape of Evidence.” Journal of Reliable Research, vol. 12, no. 3, Apr. 2026, pp. 41–59, https://doi.org/10.1234/evidence.",
     ],
     [
-      "Chicago",
+      "chicago-notes",
       "Lovelace, Ada, and Alan Turing. “The Shape of Evidence.” Journal of Reliable Research 12, no. 3 (2026): 41–59. https://doi.org/10.1234/evidence.",
     ],
-  ] as const)("formats %s through its CSL style", (style, expected) => {
+  ] as const)("formats %s through its CSL style", async (style, expected) => {
     expect(
-      engine.formatBibliography(sourceToNormalizedCitation(source), style),
+      await engine.formatBibliography(sourceToNormalizedCitation(source), style),
     ).toBe(expected);
+  });
+
+  it.each(citationStyles)("formats realistic Unicode metadata with $name", async ({ id }) => {
+    const citation = await engine.formatBibliography(sourceToNormalizedCitation({
+      ...source,
+      id: `unicode-${id}`,
+      title: "Éthique et données scientifiques",
+      authors: "World Health Organization\nJosé García\n李 明",
+      date: "",
+      type: id === "harvard" ? "Report" : "Article",
+      citationData: { title: "Éthique et données scientifiques", type: "article-journal", authors: [{ literal: "World Health Organization" }, { given: "José", family: "García" }, { family: "李", given: "明" }] },
+    }), id);
+    expect(citation).toContain("Éthique");
+    expect(citation.length).toBeGreaterThan(30);
+  });
+
+  it("formats a long bibliography without truncating entries", async () => {
+    const records = Array.from({ length: 75 }, (_, index) => sourceToNormalizedCitation({ ...source, id: `long-${index}`, title: `Research record ${index + 1}` }));
+    const entries = await engine.formatMany(records, "apa-7", records.map((_, index) => `long-${index}`));
+    expect(entries).toHaveLength(75);
+    expect(entries.at(-1)?.text).toContain("Research record 75");
+  });
+
+  it("formats a local PDF source without a fabricated filesystem URL", async () => {
+    const citation = await engine.formatBibliography(sourceToNormalizedCitation({
+      ...source,
+      id: "local-pdf",
+      storageMode: "LOCAL",
+      url: undefined,
+      title: "Research preserved on device",
+      localFile: {
+        sha256: "a".repeat(64),
+        filename: "research.pdf",
+        fileSize: 4096,
+        mimeType: "application/pdf",
+      },
+    }), "apa-7");
+    expect(citation).toContain("Research preserved on device");
+    expect(citation).not.toContain("file://");
   });
 });

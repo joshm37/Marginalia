@@ -4,7 +4,7 @@ import type {
   CreateExcerptInput,
   ExcerptRepository,
 } from "@/lib/repositories/contracts";
-import { NotFoundError } from "@/lib/api/errors";
+import { NotFoundError, ValidationError } from "@/lib/api/errors";
 
 export class PrismaExcerptRepository implements ExcerptRepository {
   list(userId: string) {
@@ -17,18 +17,36 @@ export class PrismaExcerptRepository implements ExcerptRepository {
 
   async listPage(
     userId: string,
-    { skip, take }: { skip: number; take: number },
+    { skip, take, q, sourceId, projectId, tag, type, sort = "newest" }: { skip: number; take: number; q?: string; sourceId?: string; projectId?: string; tag?: string; type?: string; sort?: string },
   ) {
     const include = { projects: true, tags: { include: { tag: true } } };
+    const where: Prisma.ExcerptWhereInput = {
+      userId,
+      ...(sourceId ? { sourceId } : {}),
+      ...(projectId ? { projects: { some: { projectId } } } : {}),
+      ...(tag ? { tags: { some: { tag: { name: tag } } } } : {}),
+      ...(type ? { excerptType: type.toUpperCase() as Prisma.EnumExcerptTypeFilter["equals"] } : {}),
+      ...(q ? { OR: [
+        { selectedText: { contains: q, mode: "insensitive" } },
+        { note: { contains: q, mode: "insensitive" } },
+        { source: { title: { contains: q, mode: "insensitive" } } },
+        { tags: { some: { tag: { name: { contains: q, mode: "insensitive" } } } } },
+      ] } : {}),
+    };
+    const orderBy: Prisma.ExcerptOrderByWithRelationInput =
+      sort === "oldest" ? { createdAt: "asc" } :
+      sort === "source" ? { source: { title: "asc" } } :
+      sort === "type" ? { excerptType: "asc" } :
+      { createdAt: "desc" };
     const [rows, total] = await prisma.$transaction([
       prisma.excerpt.findMany({
-        where: { userId },
+        where,
         include,
-        orderBy: { createdAt: "desc" },
+        orderBy,
         skip,
         take,
       }),
-      prisma.excerpt.count({ where: { userId } }),
+      prisma.excerpt.count({ where }),
     ]);
     return { rows, total };
   }
@@ -37,7 +55,7 @@ export class PrismaExcerptRepository implements ExcerptRepository {
     const [source, projects] = await Promise.all([
       prisma.source.findFirst({
         where: { id: input.sourceId, userId },
-        select: { id: true },
+        select: { id: true, storageMode: true },
       }),
       input.projectIds?.length
         ? prisma.project.findMany({
@@ -47,6 +65,8 @@ export class PrismaExcerptRepository implements ExcerptRepository {
         : [],
     ]);
     if (!source) throw new NotFoundError("Source not found");
+    if (source.storageMode === "WEB" && !input.pageUrl)
+      throw new ValidationError("A page URL is required for web-source excerpts");
     if (projects.length !== new Set(input.projectIds ?? []).size)
       throw new NotFoundError("Project not found");
 
@@ -95,7 +115,7 @@ export class PrismaExcerptRepository implements ExcerptRepository {
       }),
       prisma.source.findFirst({
         where: { id: input.sourceId, userId },
-        select: { id: true },
+        select: { id: true, storageMode: true },
       }),
       input.projectIds?.length
         ? prisma.project.findMany({
@@ -105,6 +125,8 @@ export class PrismaExcerptRepository implements ExcerptRepository {
         : [],
     ]);
     if (!excerpt || !source) return null;
+    if (source.storageMode === "WEB" && !input.pageUrl)
+      throw new ValidationError("A page URL is required for web-source excerpts");
     if (projects.length !== new Set(input.projectIds ?? []).size)
       throw new NotFoundError("Project not found");
     const oldLocation =

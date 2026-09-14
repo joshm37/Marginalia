@@ -1,14 +1,34 @@
 "use client";
 
-import { Link2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { FileCheck2, FileUp, Link2, LoaderCircle, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { displayCitationNames } from "@/lib/citations/normalized";
 import { readJsonResponse } from "@/lib/client/api";
 import type { Annotation, Project, Source, SourceType } from "@/lib/types";
+import type { MetadataField, MetadataProvenance } from "@/lib/metadata/types";
+import { provenanceLabel } from "@/lib/metadata/provenance";
+import { useDialogFocus } from "@/components/ui/useDialogFocus";
+import { chooseLocalPdf, supportsPersistentFileHandles } from "@/lib/local-documents/file-picker";
+import { sha256File } from "@/lib/local-documents/hash";
+import { saveDeviceFileAssociation } from "@/lib/local-documents/device-store";
+import { validateLocalPdf } from "@/lib/local-documents/validation";
+import type { LocalDocumentPhase, LocalFileIdentity, LocalFileSelection } from "@/lib/local-documents/types";
 
 const sourceTypes: SourceType[] = ["Article", "Report", "Case", "Bill", "Book", "Website"];
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function optionalHttpUrl(value?: string) {
+  if (!value?.trim()) return undefined;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function TagInput({
@@ -124,6 +144,7 @@ export function SourceModal({
   initialProjectId,
   initialSource,
   onCreateProject,
+  onOpenSource,
   onClose,
   onSave,
 }: {
@@ -131,10 +152,13 @@ export function SourceModal({
   initialProjectId?: string;
   initialSource?: Source;
   onCreateProject: (name: string) => Promise<Project>;
+  onOpenSource?: (source: Source) => void;
   onClose: () => void;
-  onSave: (s: Source) => void | Promise<void>;
+  onSave: (s: Source) => Source | void | Promise<Source | void>;
 }) {
-  const [step, setStep] = useState<"link" | "details">(
+  const close = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useDialogFocus<HTMLElement>(close);
+  const [step, setStep] = useState<"link" | "local" | "duplicate" | "details">(
     initialSource ? "details" : "link",
   );
   const [analysisUrl, setAnalysisUrl] = useState("");
@@ -150,6 +174,11 @@ export function SourceModal({
       finalUrl?: string;
     };
   }>();
+  const [localPhase, setLocalPhase] = useState<LocalDocumentPhase>("selecting");
+  const [localError, setLocalError] = useState("");
+  const [localIdentity, setLocalIdentity] = useState<LocalFileIdentity>();
+  const [localSelection, setLocalSelection] = useState<LocalFileSelection>();
+  const [duplicateSource, setDuplicateSource] = useState<Source>();
   const [f, setF] = useState({
     title: initialSource?.title || "",
     authors: initialSource?.authors || "",
@@ -178,9 +207,34 @@ export function SourceModal({
     notes: initialSource?.notes || "",
   });
   const [citationData, setCitationData] = useState(initialSource?.citationData);
+  const [metadataProvenance, setMetadataProvenance] =
+    useState<MetadataProvenance>(initialSource?.metadataProvenance ?? {});
+  const [reviewedFields, setReviewedFields] = useState<MetadataField[]>([]);
   const [tags, setTags] = useState<string[]>(initialSource?.tags || []);
   const [newProject, setNewProject] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
+  function setField<K extends keyof typeof f>(
+    key: K,
+    value: (typeof f)[K],
+    metadataField?: MetadataField,
+  ) {
+    setF((current) => ({ ...current, [key]: value }));
+    if (metadataField)
+      setReviewedFields((current) =>
+        current.includes(metadataField) ? current : [...current, metadataField],
+      );
+  }
+  function fieldStatus(field: MetadataField) {
+    const item = metadataProvenance[field];
+    if (!item && !reviewedFields.includes(field)) return null;
+    return (
+      <span className="metadata-field-status">
+        {reviewedFields.includes(field)
+          ? "Manually confirmed"
+          : provenanceLabel(item)}
+      </span>
+    );
+  }
   async function analyzeLink(event: React.FormEvent) {
     event.preventDefault();
     const submittedUrl = /^https?:\/\//i.test(analysisUrl.trim())
@@ -198,6 +252,8 @@ export function SourceModal({
       if (!response.ok)
         throw new Error(data.error ?? "Could not analyze this link");
       setAnalysisResult(data.analysis);
+      setMetadataProvenance(data.provenance ?? {});
+      setReviewedFields([]);
       setF((current) => ({
         ...current,
         title: data.title || "",
@@ -235,10 +291,145 @@ export function SourceModal({
       setAnalyzing(false);
     }
   }
-  function submit(e: React.FormEvent) {
+  async function importLocalPdf() {
+    setLocalError("");
+    setLocalPhase("selecting");
+    try {
+      const selection = await chooseLocalPdf();
+      if (!selection) return;
+      validateLocalPdf(selection.file);
+      setLocalSelection(selection);
+      setLocalPhase("hashing");
+      const sha256 = await sha256File(selection.file);
+      const identity: LocalFileIdentity = {
+        sha256,
+        filename: selection.file.name,
+        fileSize: selection.file.size,
+        mimeType: selection.file.type || "application/pdf",
+        ...(selection.file.lastModified
+          ? { lastModified: new Date(selection.file.lastModified).toISOString() }
+          : {}),
+      };
+      setLocalIdentity(identity);
+      setLocalPhase("checking-duplicate");
+      const duplicateResponse = await fetch(
+        `/api/sources/check-duplicate?fileHash=${encodeURIComponent(sha256)}`,
+      );
+      const duplicate = await readJsonResponse(duplicateResponse);
+      if (!duplicateResponse.ok)
+        throw new Error(duplicate.error ?? "Could not check this document");
+      if (duplicate.source) {
+        setDuplicateSource(duplicate.source);
+        setLocalPhase("ready");
+        setStep("duplicate");
+        return;
+      }
+      setLocalPhase("extracting");
+      const { extractLocalPdfMetadata } = await import(
+        "@/lib/local-documents/pdf-metadata"
+      );
+      const extracted = await extractLocalPdfMetadata(selection.file);
+      let resolved = {
+        title: extracted.title || selection.file.name.replace(/\.pdf$/i, ""),
+        authors: extracted.authors,
+        date: extracted.creationDate || "",
+        doi: extracted.doi || "",
+        isbn: extracted.isbn || "",
+        description: extracted.subject || "",
+        citationData: undefined as Source["citationData"],
+        provenance: extracted.provenance,
+        type: extracted.isbn ? ("Book" as SourceType) : ("Article" as SourceType),
+        organization: "",
+        containerTitle: "",
+        volume: "",
+        issue: "",
+        pages: "",
+      };
+      if (extracted.doi || extracted.isbn) {
+        setLocalPhase("enriching");
+        try {
+          const response = await fetch("/api/sources/enrich", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              doi: extracted.doi,
+              isbn: extracted.isbn,
+              title: resolved.title,
+              authors: extracted.authors,
+              date: extracted.creationDate,
+              description: extracted.subject,
+            }),
+          });
+          const enriched = await readJsonResponse(response);
+          if (response.ok)
+            resolved = {
+              ...resolved,
+              ...enriched,
+              authors: enriched.authors ?? resolved.authors,
+              citationData: enriched.citationData,
+              provenance: enriched.provenance ?? resolved.provenance,
+            };
+        } catch {
+          // Enrichment is best-effort; locally extracted metadata remains reviewable.
+        }
+      }
+      setMetadataProvenance(resolved.provenance);
+      setCitationData(resolved.citationData);
+      setReviewedFields([]);
+      setF((current) => ({
+        ...current,
+        title: resolved.title || "",
+        authors: resolved.authors.join("\n"),
+        organization: resolved.organization || "",
+        doi: resolved.doi || "",
+        containerTitle: resolved.containerTitle || "",
+        volume: resolved.volume || "",
+        issue: resolved.issue || "",
+        pages: resolved.pages || "",
+        editors: displayCitationNames(resolved.citationData?.editors || []),
+        translators: displayCitationNames(resolved.citationData?.translators || []),
+        edition: resolved.citationData?.edition || "",
+        publisherPlace: resolved.citationData?.publisherPlace || "",
+        isbn: resolved.isbn || "",
+        issn: resolved.citationData?.issn?.join(", ") || "",
+        accessedDate:
+          resolved.citationData?.accessed?.["date-parts"]?.[0]
+            ?.map((part: number, index: number) => index ? String(part).padStart(2, "0") : String(part))
+            .join("-") || current.accessedDate,
+        date: resolved.date || "",
+        type: resolved.type,
+        description: resolved.description || "",
+        url: "",
+      }));
+      setLocalPhase("ready");
+      setStep("details");
+    } catch (error) {
+      setLocalPhase("error");
+      setLocalError(error instanceof Error ? error.message : "Could not read this PDF.");
+    }
+  }
+  async function relinkDuplicate() {
+    if (!duplicateSource || !localIdentity || !localSelection) return;
+    try {
+      await saveDeviceFileAssociation({
+        sourceId: duplicateSource.id,
+        ...localIdentity,
+        handle: localSelection.handle,
+      });
+      setLocalPhase("relinked");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Could not remember this document.");
+    }
+  }
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!f.title || !f.url) return;
-    onSave({
+    const isLocal = Boolean(localIdentity) || initialSource?.storageMode === "LOCAL";
+    const safeUrl = optionalHttpUrl(f.url);
+    if (!f.title || (!isLocal && !safeUrl)) return;
+    const safeCitationData = citationData
+      ? { ...citationData, url: optionalHttpUrl(citationData.url) }
+      : citationData;
+    const result = await onSave({
       id: initialSource?.id || uid("s"),
       title: f.title,
       authors: f.authors
@@ -259,9 +450,13 @@ export function SourceModal({
       isbn: f.isbn,
       issn: f.issn,
       accessedDate: f.accessedDate,
-      citationData,
+      citationData: safeCitationData,
+      metadataProvenance,
+      reviewedFields,
       date: f.date,
-      url: f.url,
+      url: safeUrl,
+      storageMode: localIdentity ? "LOCAL" : initialSource?.storageMode ?? "WEB",
+      localFile: localIdentity ?? initialSource?.localFile,
       type: f.type,
       description: f.description,
       bibliographyAnnotation: f.bibliographyAnnotation,
@@ -271,13 +466,22 @@ export function SourceModal({
       createdAt:
         initialSource?.createdAt || new Date().toISOString().slice(0, 10),
     });
+    const saved = result || initialSource;
+    if (saved && localIdentity && localSelection)
+      await saveDeviceFileAssociation({
+        sourceId: saved.id,
+        ...localIdentity,
+        handle: localSelection.handle,
+      }).catch(() => undefined);
   }
+  const isLocalSource =
+    Boolean(localIdentity) || initialSource?.storageMode === "LOCAL";
   if (step === "link")
     return (
       <div className="modal-backdrop">
-        <form className="modal source-link-modal" onSubmit={analyzeLink}>
+        <form ref={dialogRef as React.Ref<HTMLFormElement>} tabIndex={-1} className="modal source-link-modal" role="dialog" aria-modal="true" aria-labelledby="source-dialog-title" onSubmit={analyzeLink}>
           <div className="card-header">
-            <h3>Save a source</h3>
+            <h3 id="source-dialog-title">Save a source</h3>
             <button type="button" className="icon-btn" onClick={onClose}>
               <X size={16} />
             </button>
@@ -306,7 +510,7 @@ export function SourceModal({
             />
           </div>
           {analysisError && (
-            <div className="analysis-error">{analysisError}</div>
+            <div className="analysis-error" role="alert">{analysisError}</div>
           )}
           <button
             className="btn primary analyze-source-button"
@@ -321,14 +525,99 @@ export function SourceModal({
           >
             Cite manually
           </button>
+          <button
+            type="button"
+            className="local-document-button"
+            onClick={() => setStep("local")}
+          >
+            <FileUp size={15} /> Add local PDF
+          </button>
         </form>
+      </div>
+    );
+  if (step === "local")
+    return (
+      <div className="modal-backdrop">
+        <div ref={dialogRef as React.Ref<HTMLDivElement>} tabIndex={-1} className="modal source-link-modal" role="dialog" aria-modal="true" aria-labelledby="local-source-dialog-title">
+          <div className="card-header">
+            <h3 id="local-source-dialog-title">Add local document</h3>
+            <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="source-link-intro">
+            <span className="source-link-icon"><FileUp size={20} /></span>
+            <h4>Choose a PDF</h4>
+            <p>Marginalia identifies and reads citation details in your browser. The PDF itself never leaves this device.</p>
+          </div>
+          {localPhase !== "selecting" && localPhase !== "error" && (
+            <div className="local-document-progress" role="status" aria-live="polite">
+              <LoaderCircle size={16} className="spin" />
+              <span>{({
+                hashing: "Identifying document…",
+                "checking-duplicate": "Checking your library…",
+                extracting: "Reading PDF metadata…",
+                enriching: "Verifying citation details…",
+              } as Partial<Record<LocalDocumentPhase, string>>)[localPhase] ?? "Preparing document…"}</span>
+            </div>
+          )}
+          {localError && <div className="analysis-error" role="alert">{localError}</div>}
+          <button className="btn primary analyze-source-button" type="button" onClick={() => void importLocalPdf()} disabled={!["selecting", "error"].includes(localPhase)}>
+            <FileUp size={15} /> {localPhase === "error" ? "Choose another PDF" : "Choose PDF"}
+          </button>
+          <button type="button" className="manual-citation-button" onClick={() => setStep("link")}>Back to link</button>
+          {!supportsPersistentFileHandles() && (
+            <small className="local-document-compatibility">This browser can save the source, but may ask you to locate the file again after reopening Marginalia.</small>
+          )}
+        </div>
+      </div>
+    );
+  if (step === "duplicate" && duplicateSource)
+    return (
+      <div className="modal-backdrop">
+        <div ref={dialogRef as React.Ref<HTMLDivElement>} tabIndex={-1} className="modal source-link-modal" role="dialog" aria-modal="true" aria-labelledby="duplicate-document-title">
+          <div className="card-header">
+            <h3 id="duplicate-document-title">Already in Marginalia</h3>
+            <button type="button" className="icon-btn" onClick={onClose} aria-label="Close"><X size={16} /></button>
+          </div>
+          <div className="source-link-intro local-duplicate-intro">
+            <span className="source-link-icon"><FileCheck2 size={20} /></span>
+            <h4>This document is already in Marginalia</h4>
+            <p><strong>{duplicateSource.title}</strong></p>
+            <p>The file contents match, even if the PDF was renamed or moved.</p>
+          </div>
+          {localError && <div className="analysis-error" role="alert">{localError}</div>}
+          {localPhase === "relinked" && <div className="analysis-notice" role="status">This device is now linked to the document.</div>}
+          <div className="local-duplicate-actions">
+            <button type="button" className="btn primary" onClick={() => { onOpenSource?.(duplicateSource); onClose(); }}>Open source</button>
+            <button type="button" className="btn" onClick={() => void relinkDuplicate()} disabled={localPhase === "relinked"}>{localPhase === "relinked" ? "Re-linked" : "Re-link this device"}</button>
+          </div>
+          <div className="field">
+            <label>ADD TO ANOTHER PROJECT</label>
+            <select defaultValue="" onChange={async (event) => {
+              const projectId = event.target.value;
+              if (!projectId || duplicateSource.projects.includes(projectId)) return;
+              const response = await fetch(`/api/sources/${duplicateSource.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ projectId }),
+              });
+              const saved = await readJsonResponse(response);
+              if (!response.ok) setLocalError(saved.error ?? "Could not add this project");
+              else setDuplicateSource(saved);
+            }}>
+              <option value="">Select project</option>
+              {projects.filter((project) => !duplicateSource.projects.includes(project.id)).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+          </div>
+        </div>
       </div>
     );
   return (
     <div className="modal-backdrop">
-      <form className="modal" onSubmit={submit}>
+      <form ref={dialogRef as React.Ref<HTMLFormElement>} tabIndex={-1} className="modal" role="dialog" aria-modal="true" aria-labelledby="source-dialog-title" onSubmit={submit}>
         <div className="card-header">
-          <h3>{initialSource ? "Edit source" : "New source"}</h3>
+          <h3 id="source-dialog-title">{initialSource ? "Edit source" : "New source"}</h3>
           <button type="button" className="icon-btn" onClick={onClose}>
             <X size={16} />
           </button>
@@ -386,100 +675,100 @@ export function SourceModal({
         )}
         <div className="form-grid">
           <div className="field">
-            <label>TITLE *</label>
+            <label>TITLE * {fieldStatus("title")}</label>
             <input
               required
               value={f.title}
-              onChange={(e) => setF({ ...f, title: e.target.value })}
+              onChange={(e) => setField("title", e.target.value, "title")}
             />
           </div>
           <div className="form-row">
             <div className="field compact-textarea">
-              <label>AUTHORS · ONE PER LINE</label>
+              <label>AUTHORS · ONE PER LINE {fieldStatus("authors")}</label>
               <textarea
                 value={f.authors}
-                onChange={(e) => setF({ ...f, authors: e.target.value })}
+                onChange={(e) => setField("authors", e.target.value, "authors")}
               />
             </div>
             <div className="field page-number-field">
-              <label>ORGANIZATION / PUBLISHER</label>
+              <label>ORGANIZATION / PUBLISHER {fieldStatus("publisher")}</label>
               <input
                 value={f.organization}
-                onChange={(e) => setF({ ...f, organization: e.target.value })}
+                onChange={(e) => setField("organization", e.target.value, "publisher")}
               />
             </div>
           </div>
           <div className="form-row">
             <div className="field compact-textarea">
-              <label>EDITORS · ONE PER LINE</label>
+              <label>EDITORS · ONE PER LINE {fieldStatus("editors")}</label>
               <textarea
                 value={f.editors}
-                onChange={(e) => setF({ ...f, editors: e.target.value })}
+                onChange={(e) => setField("editors", e.target.value, "editors")}
               />
             </div>
             <div className="field compact-textarea">
-              <label>TRANSLATORS · ONE PER LINE</label>
+              <label>TRANSLATORS · ONE PER LINE {fieldStatus("translators")}</label>
               <textarea
                 value={f.translators}
-                onChange={(e) => setF({ ...f, translators: e.target.value })}
+                onChange={(e) => setField("translators", e.target.value, "translators")}
               />
             </div>
           </div>
           <div className="form-row">
             <div className="field">
-              <label>EDITION</label>
+              <label>EDITION {fieldStatus("edition")}</label>
               <input
                 value={f.edition}
-                onChange={(e) => setF({ ...f, edition: e.target.value })}
+                onChange={(e) => setField("edition", e.target.value, "edition")}
               />
             </div>
             <div className="field">
-              <label>PUBLISHER PLACE</label>
+              <label>PUBLISHER PLACE {fieldStatus("publisherPlace")}</label>
               <input
                 value={f.publisherPlace}
-                onChange={(e) => setF({ ...f, publisherPlace: e.target.value })}
+                onChange={(e) => setField("publisherPlace", e.target.value, "publisherPlace")}
               />
             </div>
             <div className="field">
-              <label>ACCESSED</label>
+              <label>ACCESSED {fieldStatus("accessedDate")}</label>
               <input
                 type="date"
                 value={f.accessedDate}
-                onChange={(e) => setF({ ...f, accessedDate: e.target.value })}
+                onChange={(e) => setField("accessedDate", e.target.value, "accessedDate")}
               />
             </div>
           </div>
           <div className="form-row">
             <div className="field">
-              <label>ISBN</label>
+              <label>ISBN {fieldStatus("isbn")}</label>
               <input
                 value={f.isbn}
-                onChange={(e) => setF({ ...f, isbn: e.target.value })}
+                onChange={(e) => setField("isbn", e.target.value, "isbn")}
               />
             </div>
             <div className="field">
-              <label>ISSN</label>
+              <label>ISSN {fieldStatus("issn")}</label>
               <input
                 value={f.issn}
-                onChange={(e) => setF({ ...f, issn: e.target.value })}
+                onChange={(e) => setField("issn", e.target.value, "issn")}
               />
             </div>
           </div>
           <div className="form-row">
             <div className="field">
-              <label>DATE</label>
+              <label>DATE {fieldStatus("publicationDate")}</label>
               <input
                 type="date"
                 value={f.date}
-                onChange={(e) => setF({ ...f, date: e.target.value })}
+                onChange={(e) => setField("date", e.target.value, "publicationDate")}
               />
             </div>
             <div className="field">
-              <label>SOURCE TYPE</label>
+              <label>SOURCE TYPE {fieldStatus("sourceType")}</label>
               <select
                 value={f.type}
                 onChange={(e) =>
-                  setF({ ...f, type: e.target.value as SourceType })
+                  setField("type", e.target.value as SourceType, "sourceType")
                 }
               >
                 {sourceTypes.map((t) => (
@@ -488,57 +777,67 @@ export function SourceModal({
               </select>
             </div>
           </div>
+          {isLocalSource ? (
+            <div className="local-source-url-note">
+              <strong>Stored locally</strong>
+              <span>No web URL is required, and the file location stays on this device.</span>
+            </div>
+          ) : (
+            <div className="field">
+              <label>URL * {fieldStatus("url")}</label>
+              <input
+                required
+                type="url"
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+                value={f.url}
+                onChange={(e) => setField("url", e.target.value, "url")}
+              />
+            </div>
+          )}
           <div className="field">
-            <label>URL *</label>
-            <input
-              required
-              type="url"
-              value={f.url}
-              onChange={(e) => setF({ ...f, url: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>DOI</label>
+            <label>DOI {fieldStatus("doi")}</label>
             <input
               value={f.doi}
-              onChange={(e) => setF({ ...f, doi: e.target.value })}
+              onChange={(e) => setField("doi", e.target.value, "doi")}
             />
           </div>
           <div className="field">
-            <label>CONTAINER TITLE / JOURNAL</label>
+            <label>CONTAINER TITLE / JOURNAL {fieldStatus("containerTitle")}</label>
             <input
               value={f.containerTitle}
-              onChange={(e) => setF({ ...f, containerTitle: e.target.value })}
+              onChange={(e) => setField("containerTitle", e.target.value, "containerTitle")}
             />
           </div>
           <div className="form-row">
             <div className="field">
-              <label>VOLUME</label>
+              <label>VOLUME {fieldStatus("volume")}</label>
               <input
                 value={f.volume}
-                onChange={(e) => setF({ ...f, volume: e.target.value })}
+                onChange={(e) => setField("volume", e.target.value, "volume")}
               />
             </div>
             <div className="field">
-              <label>ISSUE</label>
+              <label>ISSUE {fieldStatus("issue")}</label>
               <input
                 value={f.issue}
-                onChange={(e) => setF({ ...f, issue: e.target.value })}
+                onChange={(e) => setField("issue", e.target.value, "issue")}
               />
             </div>
             <div className="field">
-              <label>PAGES</label>
+              <label>PAGES {fieldStatus("pages")}</label>
               <input
                 value={f.pages}
-                onChange={(e) => setF({ ...f, pages: e.target.value })}
+                onChange={(e) => setField("pages", e.target.value, "pages")}
               />
             </div>
           </div>
           <div className="field">
-            <label>DESCRIPTION</label>
+            <label>DESCRIPTION {fieldStatus("description")}</label>
             <textarea
               value={f.description}
-              onChange={(e) => setF({ ...f, description: e.target.value })}
+              onChange={(e) => setField("description", e.target.value, "description")}
             />
           </div>
           <div className="field">
@@ -619,6 +918,8 @@ export function AnnotationModal({
   onClose: () => void;
   onSave: (a: Annotation) => void | Promise<void>;
 }) {
+  const close = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useDialogFocus<HTMLFormElement>(close);
   const [f, setF] = useState({
     sourceId:
       initialAnnotation?.sourceId || initialSourceId || sources[0]?.id || "",
@@ -636,7 +937,12 @@ export function AnnotationModal({
   return (
     <div className="modal-backdrop">
       <form
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="excerpt-dialog-title"
         onSubmit={(e) => {
           e.preventDefault();
           onSave({
@@ -655,7 +961,7 @@ export function AnnotationModal({
         }}
       >
         <div className="card-header">
-          <h3>{initialAnnotation ? "Edit excerpt" : "New excerpt"}</h3>
+          <h3 id="excerpt-dialog-title">{initialAnnotation ? "Edit excerpt" : "New excerpt"}</h3>
           <button type="button" className="icon-btn" onClick={onClose}>
             <X size={16} />
           </button>
@@ -763,12 +1069,19 @@ export function ProjectModal({
   onClose: () => void;
   onSave: (p: Project) => void | Promise<void>;
 }) {
+  const close = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useDialogFocus<HTMLFormElement>(close);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   return (
     <div className="modal-backdrop">
       <form
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-dialog-title"
         onSubmit={(e) => {
           e.preventDefault();
           if (name)
@@ -782,7 +1095,7 @@ export function ProjectModal({
         }}
       >
         <div className="card-header">
-          <h3>New project</h3>
+          <h3 id="project-dialog-title">New project</h3>
           <button type="button" className="icon-btn" onClick={onClose}>
             <X size={16} />
           </button>

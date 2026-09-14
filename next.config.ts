@@ -24,6 +24,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const nextConfig: NextConfig = {
+  ...(process.env.E2E_TEST_MODE === "true" ? { distDir: ".next-e2e" } : {}),
   reactStrictMode: true,
   poweredByHeader: false,
   turbopack: {
@@ -31,6 +32,20 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      {
+        source: "/api/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store, max-age=0" },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
+      {
+        source: "/auth/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store, max-age=0" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
       {
         source: "/:path*",
         headers: [
@@ -50,9 +65,6 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // Keep production compilation from overwriting a running dev server's
-  // webpack module cache. Both commands otherwise write to `.next`.
-  //distDir: process.env.NODE_ENV === 'production' ? '.next-build' : '.next',
 };
 
 export default nextConfig;

@@ -56,7 +56,7 @@ export async function enforceRateLimit({
       });
     } catch (error) {
       logger.warn("rate_limit_cleanup_failed", {
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorName: error instanceof Error ? error.name : typeof error,
       });
     }
   }

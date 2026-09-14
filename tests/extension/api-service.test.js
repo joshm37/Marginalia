@@ -7,7 +7,7 @@ const auth = vi.hoisted(() => ({
 
 vi.mock("../../extension/auth-service.js", () => auth);
 
-import { enrichDoi, getProjects } from "../../extension/api-service.js";
+import { checkDuplicate, enrichDoi, getProjects } from "../../extension/api-service.js";
 
 describe("extension API client", () => {
   beforeEach(() => {
@@ -63,6 +63,21 @@ describe("extension API client", () => {
         method: "POST",
         body: JSON.stringify({ doi: "10.5555/example" }),
       }),
+    );
+  });
+
+  it("supports a hash-only local-file duplicate lookup without inventing a URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ duplicate: false, source: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const hash = "a".repeat(64);
+    await checkDuplicate({ fileHash: hash });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `http://localhost:3000/api/sources/check-duplicate?fileHash=${hash}`,
     );
   });
 });

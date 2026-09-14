@@ -29,9 +29,10 @@ import { Annotation, Project, Source, SourceType } from "@/lib/types";
 import {
   postJson,
   readJsonResponse,
-  requestCitation,
+  requestFormattedCitation,
   SESSION_EXPIRED_EVENT,
 } from "@/lib/client/api";
+import { copyCitationRichText } from "@/lib/client/citation-output";
 import type { WorkspaceView } from "@/components/workspace/types";
 import { walkthroughSteps } from "@/lib/workspace/walkthrough";
 import { UniversalSearchResults } from "@/components/workspace/UniversalSearchResults";
@@ -61,6 +62,7 @@ import { ProjectExportDialog } from "@/components/dialogs/ProjectExportDialog";
 
 
 const THEME_EVENT = "marginalia-theme-change";
+const WORKSPACE_CHANNEL = "marginalia-workspace";
 
 function subscribeToTheme(onChange: () => void) {
   const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -191,6 +193,44 @@ export default function App({
   const [toast, setToast] = useState("");
   const [sourceType, setSourceType] = useState<SourceType | "All">("All");
   const [walkthroughStep, setWalkthroughStep] = useState<number | null>(null);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const workspaceRevision = useRef(0);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+
+  async function refreshWorkspace() {
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const revision = workspaceRevision.current;
+    const operation = (async () => {
+      try {
+        const response = await fetch("/api/workspace", { cache: "no-store" });
+        const data = await readJsonResponse(response);
+        if (!response.ok) throw new Error(data.error ?? "Workspace sync failed");
+        if (revision !== workspaceRevision.current) return;
+        setSources(data.sources);
+        setProjects(data.projects);
+        setAnnotations(data.excerpts);
+        setUser(data.user);
+        setSyncError("");
+      } catch {
+        setSyncError("Your latest changes could not be checked. Retry when you’re online.");
+      } finally {
+        refreshInFlight.current = null;
+      }
+    })();
+    refreshInFlight.current = operation;
+    return operation;
+  }
+
+  function workspaceChanged() {
+    workspaceRevision.current += 1;
+    setSyncError("");
+    try {
+      const channel = new BroadcastChannel(WORKSPACE_CHANNEL);
+      channel.postMessage("changed");
+      channel.close();
+    } catch {}
+  }
 
   useEffect(() => {
     function restoreViewFromHistory() {
@@ -237,25 +277,17 @@ export default function App({
   }, [projects, sources]);
 
   useEffect(() => {
-    async function refreshWorkspace() {
-      try {
-        const response = await fetch("/api/workspace", { cache: "no-store" });
-        const data = await readJsonResponse(response);
-        if (!response.ok) return;
-        setSources(data.sources);
-        setProjects(data.projects);
-        setAnnotations(data.excerpts);
-        setUser(data.user);
-      } catch {
-        // The server-rendered snapshot remains usable if a background refresh fails.
-      }
-    }
     const refresh = () => {
-      if (document.visibilityState === "visible") refreshWorkspace();
+      if (document.visibilityState === "visible") void refreshWorkspace();
     };
+    const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(WORKSPACE_CHANNEL);
+    if (channel) channel.onmessage = refresh;
+    const interval = window.setInterval(refresh, 20_000);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
+      window.clearInterval(interval);
+      channel?.close();
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
@@ -419,6 +451,7 @@ export default function App({
       navigate(sourceBackView);
     }
     notify("Source deleted");
+    workspaceChanged();
   }
   async function updateProjectState(
     project: Project,
@@ -450,6 +483,7 @@ export default function App({
     if (selectedProject?.id === data.id) setSelectedProject(data);
     if (action === "archive") setProjectToArchive(null);
     notify(action === "unarchive" ? "Project unarchived" : "Project archived");
+    workspaceChanged();
   }
   async function permanentlyDeleteProject(project: Project) {
     const previousProjects = projects;
@@ -484,11 +518,12 @@ export default function App({
     setProjectToDelete(null);
     if (selectedProject?.id === project.id) navigate(projectBackView);
     notify("Project and its sources deleted");
+    workspaceChanged();
   }
   async function copyCitation(source: Source) {
     try {
-      const text = await requestCitation(source, "APA");
-      await navigator.clipboard?.writeText(text);
+      const citation = await requestFormattedCitation(source, "apa-7");
+      await copyCitationRichText(citation);
       notify("APA citation copied");
     } catch (error) {
       notify(
@@ -521,6 +556,7 @@ export default function App({
       current.map((item) => (item.id === saved.id ? saved : item)),
     );
     if (selectedSource?.id === saved.id) setSelectedSource(saved);
+    workspaceChanged();
     return saved as Source;
   }
   async function deleteAnnotation(annotation: Annotation) {
@@ -538,6 +574,7 @@ export default function App({
     setAnnotationToDelete(null);
     if (editingAnnotation?.id === annotation.id) setEditingAnnotation(null);
     notify("Excerpt deleted");
+    workspaceChanged();
   }
 
   return (
@@ -545,6 +582,12 @@ export default function App({
       {!isOnline && (
         <div className="connection-banner" role="status">
           You’re offline. Changes cannot be saved until your connection returns.
+        </div>
+      )}
+      {isOnline && syncError && (
+        <div className="connection-banner sync-error-banner" role="alert">
+          <span>{syncError}</span>
+          <button type="button" onClick={() => void refreshWorkspace()}>Retry</button>
         </div>
       )}
       <aside className="sidebar">
@@ -815,6 +858,9 @@ export default function App({
               }
               onRequestDelete={setProjectToDelete}
               onExport={setProjectToExport}
+              onEditSource={setEditingSource}
+              onCopySource={copyCitation}
+              onDeleteSource={setSourceToDelete}
             />
           )}
           {view === "Source" && selectedSource && (
@@ -914,6 +960,7 @@ export default function App({
                 setTheme(next);
               }}
               onStartWalkthrough={() => goToWalkthroughStep(0)}
+              onDeleteAccount={() => setDeleteAccountOpen(true)}
             />
           )}
         </div>
@@ -968,17 +1015,42 @@ export default function App({
           onConfirm={() => deleteAnnotation(annotationToDelete)}
         />
       )}
+      {deleteAccountOpen && (
+        <DeleteConfirmationModal
+          title="Delete your account permanently?"
+          subject="Your entire Marginalia workspace"
+          description="will be permanently deleted, including every project, source, excerpt, and tag. This cannot be undone."
+          confirmationText="DELETE"
+          onClose={() => setDeleteAccountOpen(false)}
+          onConfirm={async () => {
+            const response = await fetch("/api/account", {
+              method: "DELETE",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ confirmation: "DELETE" }),
+            });
+            if (!response.ok) {
+              const data = await readJsonResponse(response);
+              notify(data.error ?? "Could not delete account");
+              return;
+            }
+            router.replace("/login");
+            router.refresh();
+          }}
+        />
+      )}
 
       {editingSource && (
         <SourceModal
           projects={projects.filter((project) => !project.deletedAt)}
           initialSource={editingSource}
+          onOpenSource={openSource}
           onCreateProject={async (name) => {
             const saved = await postJson<Project>("/api/projects", {
               name,
               description: "",
             });
             setProjects((prev) => [saved, ...prev]);
+            workspaceChanged();
             notify("Project created");
             return saved;
           }}
@@ -1006,6 +1078,8 @@ export default function App({
               setSelectedSource(saved);
               setEditingSource(null);
               notify("Source updated");
+              workspaceChanged();
+              return saved as Source;
             } catch (error) {
               notify(
                 error instanceof Error
@@ -1023,12 +1097,14 @@ export default function App({
           initialProjectId={
             view === "Project" ? selectedProject?.id : undefined
           }
+          onOpenSource={openSource}
           onCreateProject={async (name) => {
             const saved = await postJson<Project>("/api/projects", {
               name,
               description: "",
             });
             setProjects((prev) => [saved, ...prev]);
+            workspaceChanged();
             notify("Project created");
             return saved;
           }}
@@ -1039,6 +1115,8 @@ export default function App({
               setSources((prev) => [saved, ...prev]);
               setModal(null);
               notify("Source saved");
+              workspaceChanged();
+              return saved;
             } catch (error) {
               notify(
                 error instanceof Error
@@ -1069,6 +1147,7 @@ export default function App({
               setAnnotations((prev) => [saved, ...prev]);
               setModal(null);
               notify("Excerpt saved");
+              workspaceChanged();
             } catch (error) {
               notify(
                 error instanceof Error
@@ -1112,6 +1191,7 @@ export default function App({
               );
               setEditingAnnotation(null);
               notify("Excerpt updated");
+              workspaceChanged();
             } catch (error) {
               notify(
                 error instanceof Error
@@ -1131,6 +1211,7 @@ export default function App({
               setProjects((prev) => [saved, ...prev]);
               setModal(null);
               notify("Project created");
+              workspaceChanged();
             } catch (error) {
               notify(
                 error instanceof Error
@@ -1149,7 +1230,8 @@ export default function App({
           onClose={() => setWalkthroughStep(null)}
         />
       )}
-      {toast && <div className="toast">{toast}</div>}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">{toast}</div>
+      {toast && <div className="toast" role="status">{toast}</div>}
     </div>
   );
 }

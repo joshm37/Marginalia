@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Highlighter,
 } from "lucide-react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 function LoginForm() {
@@ -24,6 +25,7 @@ function LoginForm() {
       : "",
   );
   const [busy, setBusy] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -57,6 +59,26 @@ function LoginForm() {
         : "/";
     router.replace(destination);
     router.refresh();
+  }
+
+  async function requestPasswordReset() {
+    if (!email.trim()) {
+      setError("Enter your email address first.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setResetSent(false);
+    const supabase = createClient();
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+      email.trim(),
+      {
+        redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent("/auth/reset-password")}`,
+      },
+    );
+    setBusy(false);
+    if (resetError) return setError(resetError.message);
+    setResetSent(true);
   }
 
   return (
@@ -96,6 +118,8 @@ function LoginForm() {
             <input
               required
               type="email"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "auth-form-error" : undefined}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
@@ -107,6 +131,8 @@ function LoginForm() {
               required
               minLength={8}
               type="password"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "auth-form-error" : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete={
@@ -114,7 +140,13 @@ function LoginForm() {
               }
             />
           </label>
-          {error && <div className="auth-message">{error}</div>}
+          {error && <div id="auth-form-error" className="auth-message" role="alert">{error}</div>}
+          {resetSent && (
+            <div className="auth-message success" role="status">
+              If an account exists for that email, a password-reset link is on
+              its way.
+            </div>
+          )}
           <button className="btn primary" disabled={busy}>
             {busy
               ? "Please wait…"
@@ -124,6 +156,16 @@ function LoginForm() {
             {!busy && <ArrowRight size={15} />}
           </button>
         </form>
+        {mode === "login" && (
+          <button
+            type="button"
+            className="auth-switch auth-forgot"
+            onClick={requestPasswordReset}
+            disabled={busy}
+          >
+            Forgot your password?
+          </button>
+        )}
         <button
           className="auth-switch"
           onClick={() => {
@@ -146,6 +188,10 @@ function LoginForm() {
             <FolderOpen size={13} /> Build projects
           </span>
         </div>
+        <nav className="auth-legal-links" aria-label="Legal">
+          <Link href="/privacy">Privacy</Link>
+          <Link href="/terms">Terms</Link>
+        </nav>
       </section>
       <aside className="auth-visual">
         <div className="auth-orbit auth-orbit-one" />

@@ -1,8 +1,9 @@
 "use client";
 
 import { Archive, ArrowRight, BookOpen, BookmarkPlus, FolderOpen, Highlighter, Library, Search, Tag, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { walkthroughSteps } from "@/lib/workspace/walkthrough";
+import { useDialogFocus } from "@/components/ui/useDialogFocus";
 
 export function Walkthrough({
   step,
@@ -17,18 +18,17 @@ export function Walkthrough({
 }) {
   const current = walkthroughSteps[step];
   const isLast = step === walkthroughSteps.length - 1;
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useDialogFocus<HTMLElement>(close);
 
   useEffect(() => {
-    closeButtonRef.current?.focus();
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
       if (event.key === "ArrowLeft" && step > 0) onBack();
       if (event.key === "ArrowRight" || event.key === "Enter") onNext();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onBack, onClose, onNext, step]);
+  }, [onBack, onNext, step]);
 
   return (
     <div className="walkthrough-layer" role="presentation">
@@ -38,6 +38,8 @@ export function Walkthrough({
         onClick={onClose}
       />
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className="walkthrough-card"
         role="dialog"
         aria-modal="true"
@@ -72,7 +74,6 @@ export function Walkthrough({
             )}
           </div>
           <button
-            ref={closeButtonRef}
             className="icon-btn"
             onClick={onClose}
             aria-label="Close walkthrough"
@@ -137,4 +138,3 @@ export function Walkthrough({
     </div>
   );
 }
-

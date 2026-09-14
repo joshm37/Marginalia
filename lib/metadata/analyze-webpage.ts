@@ -1,8 +1,7 @@
-import { detectDoi } from "@/lib/citations/identifiers";
-import { displayCitationNames } from "@/lib/citations/normalized";
-import type { NormalizedCitationData } from "@/lib/citations/types";
-import { enrichDoiWithCrossrefDetailed } from "@/lib/metadata/crossref";
 import { extractHtmlMetadataWithDiagnostics } from "@/lib/metadata/extract-html";
+import { detectIdentifierSet, mergeIdentifierSets } from "@/lib/metadata/providers/identifiers";
+import { mergeMetadataCandidates } from "@/lib/metadata/providers/merge";
+import { enrichMetadata } from "@/lib/metadata/providers/registry";
 import { safeFetchHtml } from "@/lib/metadata/safe-fetch";
 import type {
   AnalysisStatus,
@@ -10,26 +9,17 @@ import type {
   ResolvedSourceMetadata,
   WebpageAnalysis,
 } from "@/lib/metadata/types";
-
-function meaningfulEntries(data: NormalizedCitationData) {
-  return Object.fromEntries(
-    Object.entries(data).filter(([, value]) =>
-      Array.isArray(value)
-        ? value.length > 0
-        : value !== undefined && value !== "",
-    ),
-  );
-}
-
-function sourceType(cslType: string, fallback: ResolvedSourceMetadata["type"]) {
-  if (cslType === "article-journal") return "Article";
-  if (cslType === "report") return "Report";
-  if (cslType === "book") return "Book";
-  return fallback;
-}
+import { provenanceValue } from "@/lib/metadata/provenance";
 
 function fallbackMetadata(url: string, doi?: string): ResolvedSourceMetadata {
   const now = new Date();
+  const provenance = {
+    url: provenanceValue(url, "URL_INFERENCE", "LOW"),
+    sourceType: provenanceValue("Website", "URL_INFERENCE", "LOW"),
+    ...(doi
+      ? { doi: provenanceValue(doi, "URL_INFERENCE", "MEDIUM") }
+      : {}),
+  };
   return {
     title: "",
     authors: [],
@@ -50,46 +40,9 @@ function fallbackMetadata(url: string, doi?: string): ResolvedSourceMetadata {
         "date-parts": [[now.getFullYear(), now.getMonth() + 1, now.getDate()]],
       },
     },
+    provenance,
+    metadataNeedsReview: true,
   };
-}
-
-function mergeCrossref(
-  extracted: ResolvedSourceMetadata,
-  enriched: NormalizedCitationData,
-) {
-  const citationData: NormalizedCitationData = {
-    ...extracted.citationData,
-    ...meaningfulEntries(enriched),
-    url: extracted.canonicalUrl || extracted.url,
-    accessed: extracted.citationData.accessed,
-    abstract: extracted.citationData.abstract || enriched.abstract,
-  };
-  const issued = citationData.issued?.["date-parts"]?.[0];
-  return {
-    ...extracted,
-    title: citationData.title || extracted.title,
-    authors: citationData.authors
-      .map((author) => displayCitationNames([author]))
-      .filter(Boolean),
-    organization: citationData.publisher || extracted.organization,
-    date: issued
-      ? [
-          issued[0],
-          issued[1]?.toString().padStart(2, "0"),
-          issued[2]?.toString().padStart(2, "0"),
-        ]
-          .filter(Boolean)
-          .join("-")
-      : extracted.date,
-    type: sourceType(citationData.type, extracted.type),
-    containerTitle: citationData.containerTitle,
-    volume: citationData.volume,
-    issue: citationData.issue,
-    pages: citationData.pages,
-    doi: citationData.doi || extracted.doi,
-    citationData,
-    enrichedBy: "crossref" as const,
-  } satisfies ResolvedSourceMetadata;
 }
 
 function hasUsefulExtractedMetadata(metadata: ResolvedSourceMetadata) {
@@ -139,15 +92,15 @@ export async function analyzeWebpage(
   fetchImplementation: typeof fetch = fetch,
 ): Promise<WebpageAnalysis> {
   const normalizedUrl = new URL(rawUrl).toString();
-  const doiFromUrl = detectDoi(normalizedUrl);
-  const [retrieval, initialCrossref] = await Promise.all([
+  const identifiersFromUrl = detectIdentifierSet(normalizedUrl);
+  const [retrieval, initialEnrichment] = await Promise.all([
     safeFetchHtml(normalizedUrl, fetchImplementation),
-    enrichDoiWithCrossrefDetailed(doiFromUrl),
+    enrichMetadata(identifiersFromUrl),
   ]);
 
   let metadata = fallbackMetadata(
     retrieval.diagnostics.finalUrl || normalizedUrl,
-    doiFromUrl,
+    identifiersFromUrl.doi,
   );
   let extraction: ExtractionDiagnostics = {
     citationMetaTags: 0,
@@ -155,9 +108,9 @@ export async function analyzeWebpage(
     openGraphMetaTags: 0,
     prismMetaTags: 0,
     jsonLdObjects: 0,
-    detectedDoi: doiFromUrl,
-    crossrefAttempted: initialCrossref.attempted,
-    crossrefSucceeded: initialCrossref.succeeded,
+    detectedDoi: identifiersFromUrl.doi,
+    crossrefAttempted: initialEnrichment.selectedProviders.includes("CROSSREF"),
+    crossrefSucceeded: initialEnrichment.results.some((result) => result.provider === "CROSSREF" && result.status === "SUCCESS"),
   };
   const warnings = retrieval.warning ? [retrieval.warning] : [];
   let status: AnalysisStatus =
@@ -188,17 +141,15 @@ export async function analyzeWebpage(
     }
   }
 
-  const detectedDoi = metadata.doi || doiFromUrl;
-  const crossref =
-    detectedDoi && detectedDoi !== doiFromUrl
-      ? await enrichDoiWithCrossrefDetailed(detectedDoi)
-      : initialCrossref;
-  extraction.detectedDoi = detectedDoi;
-  extraction.crossrefAttempted = crossref.attempted;
-  extraction.crossrefSucceeded = crossref.succeeded;
+  const identifiers = mergeIdentifierSets(identifiersFromUrl, detectIdentifierSet(metadata.citationData, retrieval.html));
+  const enrichment = JSON.stringify(identifiers) === JSON.stringify(identifiersFromUrl) ? initialEnrichment : await enrichMetadata(identifiers);
+  extraction.detectedDoi = identifiers.doi;
+  extraction.crossrefAttempted = enrichment.selectedProviders.includes("CROSSREF");
+  extraction.crossrefSucceeded = enrichment.results.some((result) => result.provider === "CROSSREF" && result.status === "SUCCESS");
+  extraction.enrichmentProviders = enrichment.results.map(({ provider, status, cacheHit }) => ({ provider, status, cacheHit }));
 
-  if (crossref.data) {
-    metadata = mergeCrossref(metadata, crossref.data);
+  if (enrichment.candidates.length) {
+    metadata = mergeMetadataCandidates(metadata, enrichment.candidates);
     status =
       retrieval.status === "OK" &&
       status !== "BLOCKED" &&
@@ -206,10 +157,6 @@ export async function analyzeWebpage(
       isCompleteEnough(metadata)
         ? "SUCCESS"
         : "PARTIAL";
-  } else if (crossref.attempted) {
-    warnings.push(
-      "A DOI was found, but Crossref enrichment was unavailable. Extracted metadata is still editable.",
-    );
   }
 
   const incompleteWarning = warningForIncomplete(metadata);

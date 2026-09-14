@@ -4,16 +4,22 @@ import { requireUser } from "@/lib/auth/require-user";
 import { excerptDto } from "@/lib/api/dto";
 import { apiError } from "@/lib/api/responses";
 import { researchService } from "@/lib/services/research-service";
-import { excerptInputSchema, paginationSchema } from "@/lib/api/schemas";
+import { excerptInputSchema, excerptListQuerySchema } from "@/lib/api/schemas";
 import { parseJson, parseQuery } from "@/lib/api/validation";
 
 export async function GET(request: NextRequest) {
   try {
     const user = await requireUser(request);
-    const pagination = parseQuery(request.nextUrl, paginationSchema);
+    const pagination = parseQuery(request.nextUrl, excerptListQuerySchema);
     const result = await researchService.excerpts.listPage(user.id, {
       skip: (pagination.page - 1) * pagination.pageSize,
       take: pagination.pageSize,
+      q: pagination.q || undefined,
+      sourceId: pagination.sourceId,
+      projectId: pagination.projectId,
+      tag: pagination.tag || undefined,
+      type: pagination.type,
+      sort: pagination.sort,
     });
     return NextResponse.json({
       items: result.rows.map((row) =>
@@ -38,7 +44,7 @@ export async function POST(request: NextRequest) {
       selectedText: body.selectedText,
       surroundingText: body.surroundingText || undefined,
       note: body.note || undefined,
-      pageUrl: body.pageUrl ?? body.url!,
+      pageUrl: body.pageUrl ?? body.url,
       excerptType:
         ExcerptType[
           String(body.type ?? "Note").toUpperCase() as keyof typeof ExcerptType

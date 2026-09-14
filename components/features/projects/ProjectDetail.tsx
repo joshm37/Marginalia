@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookmarkPlus, FileText, Library } from "lucide-react";
+import { ArrowLeft, BookmarkPlus, Library } from "lucide-react";
 import type { Annotation, Project, Source } from "@/lib/types";
 import { ProjectMenu } from "@/components/features/projects/ProjectsView";
+import { SourceTile } from "@/components/features/sources/SourceTile";
 
 export function ProjectDetail({
   project,
@@ -14,6 +15,9 @@ export function ProjectDetail({
   onState,
   onRequestDelete,
   onExport,
+  onEditSource,
+  onCopySource,
+  onDeleteSource,
 }: {
   project: Project;
   sources: Source[];
@@ -27,6 +31,9 @@ export function ProjectDetail({
   ) => void | Promise<void>;
   onRequestDelete: (project: Project) => void;
   onExport: (project: Project) => void;
+  onEditSource: (source: Source) => void;
+  onCopySource: (source: Source) => void;
+  onDeleteSource: (source: Source) => void;
 }) {
   const annotationCount = annotations.filter((annotation) =>
     annotation.projects.includes(project.id),
@@ -66,42 +73,16 @@ export function ProjectDetail({
           </div>
         </div>
         {sources.length ? (
-          sources.map((source) => {
-            const sourceAnnotations = annotations.filter(
-              (annotation) => annotation.sourceId === source.id,
-            ).length;
-            return (
-              <button
-                className="card project-source-card"
-                key={source.id}
-                onClick={() => onSource(source)}
-              >
-                <span className="source-type-icon">
-                  <FileText size={18} />
-                </span>
-                <span className="project-source-copy">
-                  <span className="source-kind">{source.type}</span>
-                  <strong>{source.title}</strong>
-                  <small>
-                    {[source.authors, source.organization, source.date]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </small>
-                  <span className="project-source-tags">
-                    {source.tags.slice(0, 4).map((tag) => (
-                      <span className="pill" key={tag}>
-                        #{tag}
-                      </span>
-                    ))}
-                  </span>
-                </span>
-                <span className="project-source-annotation-count">
-                  {sourceAnnotations} excerpts
-                </span>
-                <ArrowRight size={16} />
-              </button>
-            );
-          })
+          sources.map((source) => (
+            <SourceTile
+              key={source.id}
+              source={source}
+              onOpen={onSource}
+              onEdit={onEditSource}
+              onCopy={onCopySource}
+              onDelete={onDeleteSource}
+            />
+          ))
         ) : (
           <div className="card empty">
             <Library size={24} />

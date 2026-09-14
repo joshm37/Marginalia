@@ -103,10 +103,16 @@ export function sourceToNormalizedCitation(
     volume: source.volume || saved?.volume,
     issue: source.issue || saved?.issue,
     pages: source.pages || saved?.pages,
-    editors: source.editors ? parseAuthorText(source.editors) : saved?.editors,
-    translators: source.translators
-      ? parseAuthorText(source.translators)
-      : saved?.translators,
+    editors:
+      saved?.editors?.length &&
+      displayCitationNames(saved.editors) === source.editors
+        ? saved.editors
+        : parseAuthorText(source.editors),
+    translators:
+      saved?.translators?.length &&
+      displayCitationNames(saved.translators) === source.translators
+        ? saved.translators
+        : parseAuthorText(source.translators),
     edition: source.edition || saved?.edition,
     publisherPlace: source.publisherPlace || saved?.publisherPlace,
     isbn: source.isbn
@@ -128,7 +134,7 @@ export function sourceToNormalizedCitation(
 export function normalizeReviewedCitation(input: {
   title: string;
   type: SourceType;
-  url: string;
+  url?: string;
   authors?: string;
   organization?: string;
   date?: string;

@@ -21,10 +21,13 @@ export async function POST(request: NextRequest) {
     const body = await parseJson(request, analyzeSchema);
     const result = await analyzeWebpage(body.url);
     logger.info("source_link_analyzed", {
-      userId: user.id,
-      status: result.analysis.status,
-      retrieval: result.analysis.retrieval,
-      extraction: result.analysis.extraction,
+      analysisStatus: result.analysis.status,
+      httpStatus: result.analysis.retrieval.httpStatus,
+      contentType: result.analysis.retrieval.contentType,
+      responseSize: result.analysis.retrieval.responseSize,
+      redirectCount: result.analysis.retrieval.redirectCount,
+      receivedHtml: result.analysis.retrieval.receivedHtml,
+      truncated: result.analysis.retrieval.truncated,
     });
     return NextResponse.json(result);
   } catch (error) {

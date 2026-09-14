@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "prisma generate",
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
@@ -28,16 +29,21 @@
   "dependencies": {
     "@citation-js/core": "^0.8.2",
     "@citation-js/plugin-csl": "^0.8.2",
+    "@citestyle/core": "^1.0.0",
+    "@citestyle/styles": "^1.0.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.112.4",
+    "@types/pdfmake": "^0.3.3",
     "cheerio": "^1.2.0",
     "docx": "^9.7.1",
     "dotenv": "^17.4.2",
     "jspdf": "^4.2.1",
     "lucide-react": "0.468.0",
     "next": "^16.3.4",
+    "pdfjs-dist": "^6.3.289",
+    "pdfmake": "^0.3.11",
     "pg": "^8.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -56,5 +62,8 @@
     "prisma": "^7.10.0",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "mysql2": "3.24.4"
   }
 }

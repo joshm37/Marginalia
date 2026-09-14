@@ -1,3 +1,4 @@
+import "server-only";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import type { AnalysisStatus, RetrievalDiagnostics } from "@/lib/metadata/types";
@@ -29,11 +30,32 @@ function isPrivateAddress(rawAddress: string) {
     return true;
   const match = address.match(/^172\.(\d+)\./);
   if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return true;
+  if (isIP(address) === 4) {
+    const parts = address.split(".").map(Number);
+    const value =
+      ((parts[0] << 24) >>> 0) +
+      (parts[1] << 16) +
+      (parts[2] << 8) +
+      parts[3];
+    const inRange = (start: number, end: number) =>
+      value >= (start >>> 0) && value <= (end >>> 0);
+    if (
+      inRange(0xc0000000, 0xc00000ff) ||
+      inRange(0xc0000200, 0xc00002ff) ||
+      inRange(0xc6120000, 0xc613ffff) ||
+      inRange(0xc6336400, 0xc63364ff) ||
+      inRange(0xcb007100, 0xcb0071ff) ||
+      inRange(0xe0000000, 0xffffffff)
+    )
+      return true;
+  }
   return (
     address.startsWith("fc") ||
     address.startsWith("fd") ||
     address.startsWith("fe80:") ||
-    address.startsWith("ff")
+    address.startsWith("ff") ||
+    address === "2001:db8::" ||
+    address.startsWith("2001:db8:")
   );
 }
 
@@ -48,12 +70,15 @@ async function publicUrl(rawUrl: string) {
     throw new UnsafeUrlError("Only HTTP and HTTPS links can be analyzed");
   if (url.username || url.password)
     throw new UnsafeUrlError("Links containing credentials cannot be analyzed");
-  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  const hostname = url.hostname
+    .toLowerCase()
+    .replace(/\.$/, "")
+    .replace(/^\[|\]$/g, "");
   if (hostname === "localhost" || hostname.endsWith(".localhost"))
     throw new UnsafeUrlError("Private or local network links cannot be analyzed");
-  const addresses = isIP(url.hostname)
-    ? [{ address: url.hostname }]
-    : await lookup(url.hostname, { all: true });
+  const addresses = isIP(hostname)
+    ? [{ address: hostname }]
+    : await lookup(hostname, { all: true });
   if (!addresses.length || addresses.some(({ address }) => isPrivateAddress(address)))
     throw new UnsafeUrlError("Private or local network links cannot be analyzed");
   return url;

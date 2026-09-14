@@ -1,4 +1,5 @@
-export type CitationStyle = "APA" | "MLA" | "Chicago";
+import type { CitationStyle } from "@/lib/citations/style-registry";
+export type { CitationStyle } from "@/lib/citations/style-registry";
 
 export type CitationName = {
   given?: string;
@@ -43,5 +44,5 @@ export interface CitationEngine {
   formatBibliography(
     data: NormalizedCitationData,
     style: CitationStyle,
-  ): string;
+  ): Promise<string>;
 }

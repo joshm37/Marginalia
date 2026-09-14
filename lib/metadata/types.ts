@@ -1,5 +1,55 @@
 import type { NormalizedCitationData } from "@/lib/citations/types";
 
+export type MetadataProvider =
+  | "USER"
+  | "CROSSREF"
+  | "HTML_CITATION_META"
+  | "JSON_LD"
+  | "DUBLIN_CORE"
+  | "PRISM"
+  | "OPEN_GRAPH"
+  | "HTML_GENERIC"
+  | "PDF_METADATA"
+  | "URL_INFERENCE"
+  | "PUBMED"
+  | "OPENALEX"
+  | "ISBN_PROVIDER";
+
+export type MetadataConfidence = "HIGH" | "MEDIUM" | "LOW";
+
+export type MetadataField =
+  | "title"
+  | "authors"
+  | "editors"
+  | "translators"
+  | "publisher"
+  | "publicationDate"
+  | "accessedDate"
+  | "containerTitle"
+  | "volume"
+  | "issue"
+  | "pages"
+  | "edition"
+  | "publisherPlace"
+  | "doi"
+  | "isbn"
+  | "issn"
+  | "language"
+  | "description"
+  | "url"
+  | "sourceType";
+
+export type ProvenancedMetadataValue = {
+  value: unknown;
+  provider: MetadataProvider;
+  confidence: MetadataConfidence;
+  reviewed: boolean;
+};
+
+export type MetadataProvenance = Partial<
+  Record<MetadataField, ProvenancedMetadataValue>
+>;
+
 export type AnalysisStatus =
   | "SUCCESS"
   | "PARTIAL"
@@ -31,6 +81,7 @@ export type ExtractionDiagnostics = {
   detectedDoi?: string;
   crossrefAttempted: boolean;
   crossrefSucceeded: boolean;
+  enrichmentProviders?: Array<{ provider: MetadataProvider; status: string; cacheHit: boolean }>;
 };
 
 export type ResolvedSourceMetadata = {
@@ -48,7 +99,9 @@ export type ResolvedSourceMetadata = {
   issue?: string;
   pages?: string;
   citationData: NormalizedCitationData;
-  enrichedBy?: "crossref";
+  enrichedBy?: MetadataProvider[];
+  provenance: MetadataProvenance;
+  metadataNeedsReview: boolean;
 };
 
 export type WebpageAnalysis = ResolvedSourceMetadata & {

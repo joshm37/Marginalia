@@ -1,5 +1,20 @@
 type LogLevel = "info" | "warn" | "error";
 
+const permittedFields = new Set([
+  "requestId", "route", "method", "status", "code", "errorName",
+  "errorMessage", "retryAfter", "analysisStatus", "httpStatus",
+  "contentType", "responseSize", "redirectCount", "receivedHtml",
+  "truncated", "routeType", "digest",
+]);
+
+function safeFields(fields: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(fields)
+      .filter(([key, value]) => permittedFields.has(key) && ["string", "number", "boolean"].includes(typeof value))
+      .map(([key, value]) => [key, typeof value === "string" ? value.slice(0, 300) : value]),
+  );
+}
+
 function write(
   level: LogLevel,
   event: string,
@@ -9,7 +24,7 @@ function write(
     timestamp: new Date().toISOString(),
     level,
     event,
-    ...fields,
+    ...safeFields(fields),
   });
   if (level === "error") console.error(entry);
   else if (level === "warn") console.warn(entry);

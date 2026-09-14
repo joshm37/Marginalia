@@ -1,6 +1,7 @@
 import type { Source } from "@/lib/types";
 import { sourceToNormalizedCitation } from "@/lib/citations/normalized";
 import type { CitationName, NormalizedCitationData } from "@/lib/citations/types";
+import { normalizedCitationToCsl } from "@/lib/citations/normalized";
 
 function names(values: CitationName[] = []) {
   return values
@@ -110,4 +111,8 @@ export function sourcesToRis(sources: Source[]) {
       return rows.join("\n");
     })
     .join("\n\n");
+}
+
+export function sourcesToCslJson(sources: Source[]) {
+  return JSON.stringify(sources.map((source) => normalizedCitationToCsl(sourceToNormalizedCitation(source), source.id)), null, 2);
 }

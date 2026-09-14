@@ -31,8 +31,14 @@ async function api(path, options = {}) {
       code: "NETWORK_ERROR",
     });
   }
-  const data =
-    response.status === 204 ? null : await response.json().catch(() => ({}));
+  let data = null;
+  if (response.status !== 204) {
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+  }
   if (response.status === 401) {
     await signOut();
     throw new ExtensionApiError("Your session expired. Sign in to Marginalia again.", { status: 401, code: "SESSION_EXPIRED" });
@@ -66,10 +72,12 @@ export const enrichDoi = (doi) =>
     method: "POST",
     body: JSON.stringify({ doi }),
   });
-export const checkDuplicate = ({ url, doi, canonicalUrl }) => {
-  const query = new URLSearchParams({ url });
+export const checkDuplicate = ({ url, doi, canonicalUrl, fileHash }) => {
+  const query = new URLSearchParams();
+  if (url) query.set("url", url);
   if (doi) query.set("doi", doi);
   if (canonicalUrl) query.set("canonicalUrl", canonicalUrl);
+  if (fileHash) query.set("fileHash", fileHash);
   return api(`/api/sources/check-duplicate?${query}`);
 };
 export const appUrl = (path = "") => `${EXTENSION_CONFIG.appBase}${path}`;

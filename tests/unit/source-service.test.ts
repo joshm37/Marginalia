@@ -5,7 +5,7 @@ import {
   normalizeUrl,
   SourceService,
 } from "@/lib/services/source-service";
-import { SourceType } from "@/lib/generated/prisma/enums";
+import { SourceStorageMode, SourceType } from "@/lib/generated/prisma/enums";
 import { detectDoi } from "@/lib/citations/identifiers";
 
 function repository(
@@ -81,5 +81,92 @@ describe("SourceService", () => {
       code: "CONFLICT",
       existingSource: existing,
     });
+  });
+
+  it("creates a local source without inventing a URL and normalizes its hash", async () => {
+    const create = vi.fn().mockResolvedValue({ id: "local-1" });
+    const findDuplicate = vi.fn().mockResolvedValue(null);
+    const service = new SourceService(repository({ create, findDuplicate }));
+    const hash = "A".repeat(64);
+    await service.create("user-1", {
+      title: "Local paper",
+      sourceType: SourceType.ARTICLE,
+      storageMode: SourceStorageMode.LOCAL,
+      localFile: {
+        sha256: hash,
+        filename: "paper.pdf",
+        fileSize: BigInt(2048),
+        mimeType: "application/pdf",
+      },
+      projectIds: ["project-1"],
+    });
+    expect(findDuplicate).toHaveBeenCalledWith("user-1", {
+      doi: undefined,
+      canonicalUrl: undefined,
+      normalizedUrl: undefined,
+      localFileHash: hash.toLowerCase(),
+    });
+    expect(create).toHaveBeenCalledWith("user-1", expect.objectContaining({
+      url: undefined,
+      canonicalUrl: undefined,
+      normalizedUrl: undefined,
+      storageMode: SourceStorageMode.LOCAL,
+      localFile: expect.objectContaining({ sha256: hash.toLowerCase() }),
+    }));
+  });
+
+  it("cannot persist local file references when called below API validation", async () => {
+    const create = vi.fn().mockResolvedValue({ id: "local-1" });
+    const service = new SourceService(repository({ create }));
+    await service.create("user-1", {
+      title: "Local paper",
+      sourceType: SourceType.ARTICLE,
+      storageMode: SourceStorageMode.LOCAL,
+      url: "file:///Users/name/Downloads/paper.pdf",
+      canonicalUrl: "file:///Users/name/Downloads/paper.pdf",
+      citationMetadata: {
+        originalUrl: "file:///Users/name/Downloads/paper.pdf",
+        provider: { path: "/Users/name/Downloads/paper.pdf" },
+      },
+      localFile: {
+        sha256: "a".repeat(64),
+        filename: "paper.pdf",
+        fileSize: BigInt(10),
+        mimeType: "application/pdf",
+      },
+      projectIds: ["project-1"],
+    });
+    const persisted = create.mock.calls[0]?.[1];
+    expect(persisted).toMatchObject({
+      url: undefined,
+      canonicalUrl: undefined,
+      normalizedUrl: undefined,
+    });
+    expect(JSON.stringify(persisted.citationMetadata)).not.toContain("/Users/name");
+  });
+
+  it("rejects a file URL for WEB sources even when called below API validation", async () => {
+    const service = new SourceService(repository());
+    await expect(service.create("user-1", {
+      title: "Bad web source",
+      sourceType: SourceType.WEBSITE,
+      url: "file:///Users/name/Downloads/paper.pdf",
+      projectIds: ["project-1"],
+    })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("rejects missing local metadata and preserves the web URL requirement", async () => {
+    const service = new SourceService(repository());
+    await expect(service.create("user-1", {
+      title: "Missing file",
+      sourceType: SourceType.ARTICLE,
+      storageMode: SourceStorageMode.LOCAL,
+      projectIds: ["project-1"],
+    })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(service.create("user-1", {
+      title: "Missing URL",
+      sourceType: SourceType.WEBSITE,
+      projectIds: ["project-1"],
+    })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
   });
 });

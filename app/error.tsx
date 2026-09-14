@@ -9,7 +9,12 @@ export default function WorkspaceError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => console.error(error), [error]);
+  useEffect(() => {
+    console.error("workspace_render_failed", {
+      name: error.name,
+      digest: error.digest,
+    });
+  }, [error]);
   return (
     <div className="workspace-state error-state">
       <h2>We couldn’t open your workspace.</h2>

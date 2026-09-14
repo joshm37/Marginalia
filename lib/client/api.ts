@@ -1,5 +1,6 @@
 import type { CitationStyle } from "@/lib/citations/types";
 import type { Source } from "@/lib/types";
+import { sourceUrlDebugSnapshot } from "@/lib/sources/storage-url";
 
 export const SESSION_EXPIRED_EVENT = "marginalia-session-expired";
 
@@ -26,9 +27,22 @@ export async function readJsonResponse(response: Response) {
 }
 
 export async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const localPdfDebug =
+    process.env.NODE_ENV === "development" &&
+    typeof window !== "undefined" &&
+    window.localStorage.getItem("marginalia:local-pdf-debug") === "1" &&
+    url === "/api/sources";
+  if (localPdfDebug)
+    console.info(
+      "LOCAL_PDF_SAVE_DEBUG_V3_CLIENT",
+      sourceUrlDebugSnapshot(body, url),
+    );
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(localPdfDebug ? { "x-marginalia-local-pdf-debug": "1" } : {}),
+    },
     body: JSON.stringify(body),
   });
   const data = await readJsonResponse(response);
@@ -37,9 +51,17 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 export async function requestCitation(source: Source, style: CitationStyle) {
-  const result = await postJson<{ citation: string }>("/api/citations/format", {
+  return (await requestFormattedCitation(source, style)).text;
+}
+
+export async function requestFormattedCitation(source: Source, style: CitationStyle) {
+  const result = await postJson<{ citation: string; html: string }>("/api/citations/format", {
     source,
     style,
   });
-  return result.citation;
+  return { text: result.citation, html: result.html };
+}
+
+export async function requestBibliography(sources: Source[], style: CitationStyle, preserveOrder = false) {
+  return postJson<{ entries: Array<{ id?: string; text: string; html: string }> }>("/api/citations/bibliography", { sources, style, preserveOrder });
 }

@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
       url: query.url,
       doi: query.doi || undefined,
       canonicalUrl: query.canonicalUrl,
+      localFileHash: query.fileHash,
     });
     return NextResponse.json({
       duplicate: Boolean(match),

@@ -39,11 +39,9 @@ export function apiError(error: unknown, request?: Request) {
     code: normalized.code,
     errorName: error instanceof Error ? error.name : typeof error,
     errorMessage:
-      normalized.status < 500
-        ? error instanceof Error
-          ? error.message
-          : String(error)
-        : "Internal error details redacted",
+      error instanceof AppError
+        ? error.message
+        : "Unexpected error details redacted",
   });
 
   const body: Record<string, unknown> = {

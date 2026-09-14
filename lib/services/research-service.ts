@@ -32,7 +32,7 @@ export const researchService = {
   },
   excerpts: {
     list: (userId: string) => excerpts.list(userId),
-    listPage: (userId: string, pagination: { skip: number; take: number }) =>
+    listPage: (userId: string, pagination: { skip: number; take: number; q?: string; sourceId?: string; projectId?: string; tag?: string; type?: string; sort?: string }) =>
       excerpts.listPage(userId, pagination),
     create: (userId: string, input: CreateExcerptInput) =>
       excerpts.create(userId, input),

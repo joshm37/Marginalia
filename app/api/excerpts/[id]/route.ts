@@ -20,7 +20,7 @@ export async function PATCH(
       selectedText: body.selectedText,
       surroundingText: body.surroundingText || undefined,
       note: body.note || undefined,
-      pageUrl: body.pageUrl ?? body.url!,
+      pageUrl: body.pageUrl ?? body.url,
       excerptType:
         ExcerptType[
           String(body.type ?? "Note").toUpperCase() as keyof typeof ExcerptType

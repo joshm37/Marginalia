@@ -53,7 +53,7 @@ async function applySavedTheme() {
       : "light";
   }
 }
-function setupTagEditor() {
+async function setupTagEditor() {
   const root = $("#sourceTagEditor"),
     control = root.querySelector(".tag-control"),
     input = root.querySelector("input"),
@@ -119,12 +119,10 @@ function setupTagEditor() {
       render();
     }
   };
-  getTags()
-    .then((data) => {
-      options = data;
-      render();
-    })
-    .catch(() => undefined);
+  try {
+    options = await getTags();
+    render();
+  } catch {}
 }
 function renderProjects(projects, selectedId) {
   $("#project").innerHTML =
@@ -298,7 +296,7 @@ async function extractPage() {
           ? `${firstPage}-${lastPage}`
           : firstPage || jsonLd.pagination || "";
       const structuredNames = authors.map((name) => {
-        if (/\b(university|institute|association|agency|department|press)\b/i.test(name))
+        if (/\b(university|institute|association|organization|organisation|agency|department|committee|council|corporation|company|foundation|society|government|ministry|press)\b/i.test(name))
           return { literal: name };
         const parts = name.trim().split(/\s+/);
         return parts.length > 1
@@ -415,13 +413,14 @@ async function openCapture() {
     status("Save this source first, then Marginalia will attach your selected excerpt.");
   if (page.extractionWarning) status(page.extractionWarning);
   $("#signout").classList.remove("hidden");
-  getProjects()
-    .then((fresh) => {
-      const selected = $("#project").value;
-      chrome.storage.local.set({ [PROJECTS_KEY]: fresh });
-      renderProjects(fresh, selected);
-    })
-    .catch((error) => status(error.message));
+  try {
+    const fresh = await getProjects();
+    const selected = $("#project").value;
+    await chrome.storage.local.set({ [PROJECTS_KEY]: fresh });
+    renderProjects(fresh, selected);
+  } catch (error) {
+    status(error.message);
+  }
 }
 $("#login").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -612,13 +611,14 @@ $("#signout").addEventListener("click", async () => {
   status("");
   show("login");
 });
-$("#saveAnother").addEventListener("click", () =>
-  openCapture().catch((error) => {
+$("#saveAnother").addEventListener("click", async () => {
+  try {
+    await openCapture();
+  } catch (error) {
     status(error.message);
     show("login");
-  }),
-);
-applySavedTheme();
+  }
+});
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.marginaliaTheme) applySavedTheme();
   if (
@@ -631,14 +631,20 @@ chrome.storage.onChanged.addListener((changes, area) => {
     show("login");
   }
 });
-getSession()
-  .then((session) => (session ? openCapture() : show("login")))
-  .catch((error) => {
+setupTagEditor();
+(async () => {
+  await applySavedTheme();
+  try {
+    const session = await getSession();
+    if (session) await openCapture();
+    else show("login");
+  } catch (error) {
     status(error.message);
     show("login");
-  });
-setupTagEditor();
-chrome.runtime.sendMessage({ type: "queue-status" }).then((result) => {
-  if (result?.count)
-    status(`${result.count} capture${result.count === 1 ? " is" : "s are"} waiting to retry.`);
-}).catch(() => undefined);
+  }
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "queue-status" });
+    if (result?.count)
+      status(`${result.count} capture${result.count === 1 ? " is" : "s are"} waiting to retry.`);
+  } catch {}
+})();

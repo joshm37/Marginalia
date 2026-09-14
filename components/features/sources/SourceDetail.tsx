@@ -1,11 +1,15 @@
 "use client";
 
-import { ArrowLeft, BookOpen, Copy, ExternalLink, Highlighter, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Copy, ExternalLink, FileText, Highlighter, Pencil, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { CitationStyle } from "@/lib/citations/types";
+import { citationStyles, defaultCitationStyle } from "@/lib/citations/style-registry";
 import type { Annotation, Source } from "@/lib/types";
-import { requestCitation } from "@/lib/client/api";
+import { requestFormattedCitation } from "@/lib/client/api";
+import { copyCitationRichText } from "@/lib/client/citation-output";
 import { AnnotationActions } from "@/components/ui/AnnotationActions";
+import { LocalDocumentAccess } from "./LocalDocumentAccess";
 
 export function SourceDetail({
   source,
@@ -35,10 +39,11 @@ export function SourceDetail({
   onAddAnnotation: () => void;
   onBack: () => void;
 }) {
-  const [style, setStyle] = useState<CitationStyle>("APA");
+  const [style, setStyle] = useState<CitationStyle>(defaultCitationStyle);
   const [citationResult, setCitationResult] = useState({
     key: "",
     text: "",
+    html: "",
     error: "",
   });
   const [copied, setCopied] = useState(false);
@@ -58,10 +63,10 @@ export function SourceDetail({
   useEffect(() => {
     let active = true;
     const key = `${source.id}:${source.title}:${source.date}:${style}`;
-    requestCitation(source, style)
+    requestFormattedCitation(source, style)
       .then(
         (citation) =>
-          active && setCitationResult({ key, text: citation, error: "" }),
+          active && setCitationResult({ key, text: citation.text, html: citation.html, error: "" }),
       )
       .catch(
         (error) =>
@@ -69,6 +74,7 @@ export function SourceDetail({
           setCitationResult({
             key,
             text: "",
+            html: "",
             error:
               error instanceof Error
                 ? error.message
@@ -99,14 +105,16 @@ export function SourceDetail({
           </p>
         </div>
         <div className="detail-page-actions source-detail-actions">
-          <a
-            className="btn open-original-button"
-            href={source.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open original <ExternalLink size={14} />
-          </a>
+          {source.storageMode === "LOCAL" && (
+            <Link className="btn primary" href={`/sources/${source.id}/read`}>
+              Read PDF <FileText size={14} />
+            </Link>
+          )}
+          {source.url && (
+            <a className="btn open-original-button" href={source.url} target="_blank" rel="noreferrer">
+              Open original <ExternalLink size={14} />
+            </a>
+          )}
           <button
             className="icon-btn source-edit-button"
             title="Edit citation information"
@@ -125,6 +133,9 @@ export function SourceDetail({
           </button>
         </div>
       </div>
+      {source.storageMode === "LOCAL" && source.localFile && (
+        <LocalDocumentAccess source={source} />
+      )}
       <section className="card citation-header-card">
         <div className="citation-toolbar">
           <div className="citation-title">
@@ -138,16 +149,14 @@ export function SourceDetail({
                 value={style}
                 onChange={(e) => setStyle(e.target.value as CitationStyle)}
               >
-                <option>APA</option>
-                <option>MLA</option>
-                <option>Chicago</option>
+                {citationStyles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             </label>
             <button
               className="btn citation-copy-button"
               disabled={!text}
               onClick={() => {
-                navigator.clipboard?.writeText(text);
+                void copyCitationRichText({ text, html: citationResult.html });
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1200);
               }}

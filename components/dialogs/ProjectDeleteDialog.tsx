@@ -1,8 +1,9 @@
 "use client";
 
 import { Archive, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { Project } from "@/lib/types";
+import { useDialogFocus } from "@/components/ui/useDialogFocus";
 
 export function ProjectDeleteModal({
   project,
@@ -14,13 +15,8 @@ export function ProjectDeleteModal({
   onConfirm: () => void | Promise<void>;
 }) {
   const [deleting, setDeleting] = useState(false);
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !deleting) onClose();
-    }
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [deleting, onClose]);
+  const close = useCallback(() => { if (!deleting) onClose(); }, [deleting, onClose]);
+  const dialogRef = useDialogFocus(close);
   return (
     <div
       className="modal-backdrop"
@@ -30,6 +26,8 @@ export function ProjectDeleteModal({
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal project-delete-modal"
         role="alertdialog"
         aria-modal="true"
@@ -72,21 +70,19 @@ export function DeleteConfirmationModal({
   description,
   onClose,
   onConfirm,
+  confirmationText,
 }: {
   title: string;
   subject: string;
   description: string;
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
+  confirmationText?: string;
 }) {
   const [deleting, setDeleting] = useState(false);
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !deleting) onClose();
-    }
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [deleting, onClose]);
+  const [confirmation, setConfirmation] = useState("");
+  const close = useCallback(() => { if (!deleting) onClose(); }, [deleting, onClose]);
+  const dialogRef = useDialogFocus(close);
   return (
     <div
       className="modal-backdrop"
@@ -96,6 +92,8 @@ export function DeleteConfirmationModal({
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal project-delete-modal"
         role="alertdialog"
         aria-modal="true"
@@ -108,13 +106,25 @@ export function DeleteConfirmationModal({
         <p>
           <strong>{subject}</strong> {description}
         </p>
+        {confirmationText && (
+          <label className="delete-confirmation-field" htmlFor="delete-confirmation-text">
+            Type <strong>{confirmationText}</strong> to confirm
+            <input
+              id="delete-confirmation-text"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+        )}
         <div className="modal-footer">
           <button className="btn" onClick={onClose} disabled={deleting}>
             Cancel
           </button>
           <button
             className="btn danger-solid"
-            disabled={deleting}
+            disabled={deleting || Boolean(confirmationText && confirmation !== confirmationText)}
             onClick={async () => {
               setDeleting(true);
               await onConfirm();
@@ -140,13 +150,8 @@ export function ArchiveConfirmationModal({
   onConfirm: () => void | Promise<void>;
 }) {
   const [archiving, setArchiving] = useState(false);
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !archiving) onClose();
-    }
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [archiving, onClose]);
+  const close = useCallback(() => { if (!archiving) onClose(); }, [archiving, onClose]);
+  const dialogRef = useDialogFocus(close);
   return (
     <div
       className="modal-backdrop"
@@ -156,6 +161,8 @@ export function ArchiveConfirmationModal({
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal project-delete-modal archive-confirmation-modal"
         role="alertdialog"
         aria-modal="true"

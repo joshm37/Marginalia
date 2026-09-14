@@ -35,4 +35,13 @@ describe("extension retry queue", () => {
     expect(queue).toHaveLength(1);
     expect(queue[0].attempts).toBe(0);
   });
+
+  it("deduplicates identical queued captures", async () => {
+    const { enqueueRequest } = await import("../../extension/queue-service.js");
+    const payload = { selectedText: "Same evidence", sourceId: "source-1" };
+    const first = await enqueueRequest("excerpt", payload);
+    const second = await enqueueRequest("excerpt", payload);
+    expect(second.id).toBe(first.id);
+    expect(queue).toHaveLength(1);
+  });
 });
