@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight,
@@ -18,6 +18,11 @@ function LoginForm() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmationAttempted, setConfirmationAttempted] = useState(false);
+  const confirmationInput = useRef<HTMLInputElement>(null);
+  const passwordMismatch =
+    mode === "signup" && confirmationAttempted && password !== confirmPassword;
   const [name, setName] = useState("");
   const [error, setError] = useState(() =>
     search.get("error") === "confirmation_failed"
@@ -29,6 +34,12 @@ function LoginForm() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (mode === "signup" && password !== confirmPassword) {
+      setConfirmationAttempted(true);
+      setError("");
+      confirmationInput.current?.focus();
+      return;
+    }
     setBusy(true);
     setError("");
     if (process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true") {
@@ -140,6 +151,27 @@ function LoginForm() {
               }
             />
           </label>
+          {mode === "signup" && (
+            <label>
+              Confirm password
+              <input
+                ref={confirmationInput}
+                required
+                minLength={8}
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                aria-invalid={passwordMismatch}
+                aria-describedby={passwordMismatch ? "password-confirmation-error" : undefined}
+              />
+            </label>
+          )}
+          {passwordMismatch && (
+            <div id="password-confirmation-error" className="auth-message" role="alert">
+              Passwords don’t match. Enter the same password in both fields.
+            </div>
+          )}
           {error && <div id="auth-form-error" className="auth-message" role="alert">{error}</div>}
           {resetSent && (
             <div className="auth-message success" role="status">
@@ -168,8 +200,11 @@ function LoginForm() {
         )}
         <button
           className="auth-switch"
+          disabled={busy}
           onClick={() => {
             setMode(mode === "login" ? "signup" : "login");
+            setConfirmPassword("");
+            setConfirmationAttempted(false);
             setError("");
           }}
         >

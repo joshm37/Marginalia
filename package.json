@@ -8,7 +8,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "prisma generate && tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mts",
