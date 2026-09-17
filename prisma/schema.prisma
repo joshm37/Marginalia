@@ -44,7 +44,8 @@ enum ExcerptType {
 
 model User {
   id           String        @id
-  email        String        @unique
+  // Contact snapshot only. Supabase ID, never email, determines ownership.
+  email        String
   displayName  String?
   sources      Source[]
   projects     Project[]

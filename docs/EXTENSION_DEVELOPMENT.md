@@ -13,7 +13,7 @@ Authoritative source: `extension/`. These are browser-native JavaScript modules,
 ## Daily workflow
 
 1. Edit `extension/`.
-2. Run `npm run extension:build`, or keep `npm run extension:dev` running to rebuild on changes. Changes to the build script itself require restarting the watcher.
+2. Run `npm run extension:build`, or keep `npm run extension:dev` running to rebuild on extension and shared PDF utility changes. Changes to the build script itself require restarting the watcher. Avoid running a manual build while watching; a per-output lock rejects simultaneous builds. A failed build keeps the previous complete output, and successful builds publish validated staging output.
 3. Open `chrome://extensions` and enable Developer mode.
 4. Inspect Marginalia's Details and its unpacked source path. Load unpacked from **`.extension-build/marginalia`** in this repository. Do not load `extension/`, a Downloads copy, or `.extension-build/production` for local work. Disable obsolete copies so their identical icons do not cause confusion. Changing unpacked directories can change the extension ID and require signing in again; ordinary reloads keep storage.
 5. After the build completes, click Reload on that extension card and reopen its popup.

@@ -50,7 +50,7 @@ test("captures a source from an analyzed link", async ({ page, request }) => {
   });
   await page.getByRole("button", { name: "Save a source" }).click();
   await page
-    .locator(".source-link-modal input[type=url]")
+    .locator(".source-link-modal input[inputmode=url]")
     .fill(`https://example.test/article/${id}`);
   await page.getByRole("button", { name: "Analyze and continue" }).click();
   await expect(page.getByRole("heading", { name: "New source" })).toBeVisible();

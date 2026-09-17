@@ -38,6 +38,8 @@ export async function requireUser(
   } = await supabase.auth.getUser(token);
   if (error || !user?.email)
     throw new UnauthorizedError("Authentication required");
+  // Synchronize by verified Supabase ID only. Email is a mutable contact
+  // snapshot and must never be used to adopt another account's research.
   await prisma.user.upsert({
     where: { id: user.id },
     update: {

@@ -49,6 +49,7 @@ Marginalia accesses page metadata and text only to perform capture features requ
 | `contextMenus` | permissions | Adds “Save selection to Marginalia” to the selection context menu. |
 | `alarms` | permissions | Retries captures that failed because the network was temporarily unavailable. |
 | Production Marginalia origin | host_permissions | Sends authenticated capture requests only to the deployed Marginalia service. The production build scopes this to one configured HTTPS origin. |
+| `file:///*` | host_permissions | Reads the active local PDF for on-device hashing and metadata extraction, only after the user enables Chrome's file access setting. PDF bytes and filesystem paths are not uploaded. |
 | `<all_urls>` | content-script matches | Detects user text selections on research pages. It does not grant backend network access and does not transmit content until the user saves it. |
 
 ## Privacy & Data Use

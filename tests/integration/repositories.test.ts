@@ -51,6 +51,20 @@ suite("PostgreSQL repositories", () => {
     await prisma.$disconnect();
   });
 
+  it("allows reused emails without merging identities or project ownership", async () => {
+    const email = `${runId}-shared@example.test`;
+    for (const id of [users.a, users.b, users.b]) {
+      await prisma.user.upsert({
+        where: { id },
+        create: { id, email },
+        update: { email },
+      });
+    }
+    expect(await prisma.user.count({ where: { email } })).toBe(2);
+    expect((await projects.listAll(users.a)).map((p) => p.id)).toContain(projectA1.id);
+    expect((await projects.listAll(users.b)).map((p) => p.id)).not.toContain(projectA1.id);
+  });
+
   it("isolates user data and rejects a foreign project", async () => {
     await expect(
       sources.create(users.a, {

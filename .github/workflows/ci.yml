@@ -36,6 +36,7 @@ jobs:
       - run: npm run db:deploy
       - run: npm run check
       - run: npm test
+      - run: npm run extension:build
       - run: npm run test:integration
       - run: npm run build
       - run: npx playwright install --with-deps chromium

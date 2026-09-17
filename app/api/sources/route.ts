@@ -9,7 +9,6 @@ import { parseJson, parseQuery } from "@/lib/api/validation";
 import { normalizeReviewedCitation } from "@/lib/citations/normalized";
 import { citationPersistenceData } from "@/lib/citations/persistence";
 import { finalizeReviewedProvenance } from "@/lib/metadata/provenance";
-import { sourceUrlDebugSnapshot } from "@/lib/sources/storage-url";
 
 export async function GET(request: NextRequest) {
   try {
@@ -50,16 +49,6 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireUser(request);
-    if (
-      process.env.NODE_ENV === "development" &&
-      request.headers.get("x-marginalia-local-pdf-debug") === "1"
-    ) {
-      const debugBody = await request.clone().json().catch(() => undefined);
-      console.info(
-        "LOCAL_PDF_SAVE_DEBUG_V3_SERVER",
-        sourceUrlDebugSnapshot(debugBody, request.nextUrl.pathname),
-      );
-    }
     const body = await parseJson(request, sourceInputSchema);
     const citation = normalizeReviewedCitation(body);
     const review = finalizeReviewedProvenance(
@@ -79,7 +68,9 @@ export async function POST(request: NextRequest) {
           ).toUpperCase() as keyof typeof SourceType
         ] ?? SourceType.ARTICLE,
       url: body.url || undefined,
-      storageMode: body.storageMode ? SourceStorageMode[body.storageMode] : undefined,
+      storageMode: body.storageMode
+        ? SourceStorageMode[body.storageMode]
+        : undefined,
       localFile: body.localFile
         ? { ...body.localFile, fileSize: BigInt(body.localFile.fileSize) }
         : body.localFile,

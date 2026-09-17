@@ -47,8 +47,9 @@ export function sanitizeSourceUrlsForStorage(input: unknown) {
   const provenance =
     source.metadataProvenance && typeof source.metadataProvenance === "object"
       ? Object.fromEntries(
-          Object.entries(source.metadataProvenance as Record<string, unknown>)
-            .filter(([field]) => field !== "url"),
+          Object.entries(
+            source.metadataProvenance as Record<string, unknown>,
+          ).filter(([field]) => field !== "url"),
         )
       : source.metadataProvenance;
   return {
@@ -57,28 +58,5 @@ export function sanitizeSourceUrlsForStorage(input: unknown) {
     canonicalUrl: undefined,
     citationData,
     metadataProvenance: provenance,
-  };
-}
-
-/** Deliberately narrow diagnostics for the opt-in local-PDF runtime trace. */
-export function sourceUrlDebugSnapshot(input: unknown, endpointBeingCalled: string) {
-  const source = input && typeof input === "object"
-    ? input as Record<string, unknown>
-    : {};
-  const citationData = source.citationData && typeof source.citationData === "object"
-    ? source.citationData as Record<string, unknown>
-    : {};
-  const citationMetadata = source.citationMetadata && typeof source.citationMetadata === "object"
-    ? source.citationMetadata as Record<string, unknown>
-    : {};
-  return {
-    storageMode: source.storageMode,
-    url: source.url,
-    canonicalUrl: source.canonicalUrl,
-    normalizedUrl: source.normalizedUrl,
-    citationDataUrl: citationData.url,
-    citationMetadataUrl: citationMetadata.url ?? citationMetadata.URL,
-    bibliographicUrl: citationMetadata.bibliographicUrl,
-    endpointBeingCalled,
   };
 }
