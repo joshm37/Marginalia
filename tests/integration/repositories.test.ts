@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db/prisma";
 import { NotFoundError } from "@/lib/api/errors";
 import { PrismaExcerptRepository } from "@/lib/repositories/prisma/annotation-repository";
@@ -32,7 +32,9 @@ suite("PostgreSQL repositories", () => {
   let projectA2: { id: string };
   let projectB: { id: string };
 
-  beforeAll(async () => {
+  // Each case needs an empty workspace; security tests intentionally retain
+  // foreign records to prove unauthorized mutations did not remove them.
+  beforeEach(async () => {
     await prisma.user.createMany({
       data: [
         { id: users.a, email: `${users.a}@example.test` },
@@ -44,10 +46,13 @@ suite("PostgreSQL repositories", () => {
     projectB = await projects.create(users.b, { name: `${runId}-foreign` });
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await prisma.user.deleteMany({
       where: { id: { in: Object.values(users) } },
     });
+  });
+
+  afterAll(async () => {
     await prisma.$disconnect();
   });
 
